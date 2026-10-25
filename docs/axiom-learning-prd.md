@@ -67,7 +67,7 @@ The review used store pages and articles. It did not use the tools themselves. T
 
 ### Non-goals for the prototype
 
-- Native phone apps. The prototype is an installable web app.
+- Native phone apps. The prototype is a website.
 - Payments.
 - Points, streaks, and other game features.
 - Voice and video.
