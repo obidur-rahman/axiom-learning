@@ -7,7 +7,7 @@
 | Date | 2026-10-25 |
 | Owner | Obidur Rahman, NorthAxis |
 | Status | Draft for the prototype |
-| Related documents | AXL-PRD-001, AXL-SCHEMA-001, AXL-PLAN-001 |
+| Related documents | AXL-PRD-001, AXL-SCHEMA-001, AXL-PLAN-001, AXL-VIDEO-001 |
 
 Writing rules: This document follows the ASD-STE100 rules as closely as possible. Terms are in the PRD, Section 14.
 
@@ -141,6 +141,33 @@ The `engine` package runs the pruning rules in Section 6. It saves a Roadmap ver
 5. The worker saves the Lesson. All Learners of the same Course use the saved Lesson.
 
 A Premade Roadmap uses a shared Lesson. It has no Material. The Lesson has the mark "General content".
+
+### 5.8 Step 8: Build a Tutorial Video (on demand)
+
+1. The Learner opens the video tab on a Node page.
+2. The API looks for a saved Tutorial Video for the Node, the language, and the level.
+3. If none exists, the API makes a job. The worker builds the video from the saved Lesson of the Node.
+4. The worker splits the Lesson into Slides. Each Slide holds one key point, one formula, or one diagram. The Slide shows the key point. It does not show the full text.
+5. The worker writes the Voice text. The Voice text explains each Slide. It does not read the Slide word for word.
+6. The worker makes a Transcript from the Voice text. Each line has the text and the start time.
+7. The worker renders the audio for the Voice track.
+8. The worker renders the Slides as a video. The audio and the Slides are timed to the Transcript.
+9. The worker saves the video in storage. It saves the Transcript and the slide list in the database.
+10. The API returns the video, the Transcript, and the slide list. The Learner can play it at once.
+
+The video is saved. The second open is fast. The same video serves all Learners of the same Node, language, and level.
+
+The video uses the same Lesson text as the Lesson page. The Slides and the Voice must not contradict the Lesson.
+
+The video must respect the "reduce motion" setting. The slide change time is longer when the setting is on.
+
+The video supports the language of the Learner. A video in Bangla uses a Bangla voice and Bangla text.
+
+The video shows captions for the voice. The captions come from the Transcript.
+
+The Learner can tap a line in the Transcript to jump to that moment in the video.
+
+The worker does not use voice or video models in the prototype. It uses a text-to-speech provider and a slide renderer. The team chooses the providers in milestone M0.
 
 ## 6. Roadmap rules
 
@@ -294,6 +321,9 @@ Do not use one total score from the model. Scores by part reduce judge bias.
 | SEC-9 | A share link shows only the Roadmap structure. It never shows Material. |
 | SEC-10 | Do not put API keys in the browser. Keep them on the server. |
 | SEC-11 | Read the data terms of the model provider. Record the result before launch. |
+| SEC-12 | Store video files in a private bucket. Use signed links that expire. |
+| SEC-13 | A share link never shows a video or a Lesson. It shows only the Roadmap structure. |
+| SEC-14 | Read the data terms of the text-to-speech provider. Record the result before launch. |
 
 ## 12. Cost control
 
@@ -303,10 +333,13 @@ Do not use one total score from the model. Scores by part reduce judge bias.
 | COST-2 | Build a Lesson only when a Learner opens its Node. |
 | COST-3 | Save and reuse all made content. |
 | COST-4 | Share Prerequisite edges and Lessons between Learners when the Topic is the same. |
-| COST-5 | Set daily limits. The first limits are 20 Tutor messages, 3 Material uploads, and 30 Lesson builds for each Learner. They are proposals. |
+| COST-5 | Set daily limits. The first limits are 20 Tutor messages, 3 Material uploads, 30 Lesson builds, and 10 video builds for each Learner. They are proposals. |
 | COST-6 | Record the tokens and the cost of each call in `usage_events`. |
-| COST-7 | Do not use fine-tuning, voice, or video in the prototype. |
+| COST-7 | Do not use fine-tuning, voice, or video models in the prototype. |
 | COST-8 | Check the free plan limits of Vercel and Supabase before launch. |
+| COST-9 | Share Tutorial Videos between Learners when the Topic, language, and level are the same. |
+| COST-10 | Build a video only when the Learner opens the video tab. Do not build it at the same time as the Lesson. |
+| COST-11 | Record the cost of each video build in `usage_events`. |
 
 ## 13. Performance targets
 
@@ -318,6 +351,9 @@ Do not use one total score from the model. Scores by part reduce judge bias.
 | First word of a Tutor answer | Less than 5 seconds |
 | Graph update after a toggle | Less than 1 second for 200 Nodes |
 | First page load on 4G | Less than 4 seconds |
+| Tutorial Video that is not saved | Less than 30 seconds |
+| Saved Tutorial Video | Less than 2 seconds |
+| First frame of a Tutorial Video on 4G | Less than 4 seconds |
 
 ## 14. Evaluation
 
@@ -330,6 +366,8 @@ Do not use one total score from the model. Scores by part reduce judge bias.
 | E3 | Scan set | 10 pages: print, handwriting, math, and Bangla. |
 | E4 | Tutor set | 30 questions with known answers and known source pages. |
 | E5 | Grading set | 30 written answers that a human scored. |
+| E6 | Video set | 10 Nodes with known Lessons. The builder checks the Slides, the Voice text, and the Transcript. |
+| E7 | Voice set | 20 sentences in Bangla and in English. A human rates the voice quality on a scale of 1 to 5. |
 
 ### 14.2 Measures
 
@@ -341,6 +379,10 @@ Do not use one total score from the model. Scores by part reduce judge bias.
 | Tutor groundedness | A judge model checks that the cited page supports each claim. A human checks 30 answers. |
 | Scoring | Compare the model scores with the human scores. |
 | Bangla quality | A human rates 20 answers on a scale of 1 to 5. |
+| Video slide quality | A human checks 10 videos in E6. Each Slide must show one key point, formula, or diagram. |
+| Voice and transcript sync | The transcript time codes must match the audio. A human checks 10 videos. |
+| Slide and voice agreement | The Voice text must explain the Slide. It must not read the Slide word for word. A human checks 10 videos. |
+| Voice quality | A human rates 20 sentences in E7 on a scale of 1 to 5. |
 
 The judge model must not be the model that made the content. A human set must back each judge test.
 
@@ -362,6 +404,10 @@ The judge model must not be the model that made the content. A human set must ba
 | DEC-5 | Keep Overrides separate from the base graph. | A rebuild must not delete user edits. |
 | DEC-6 | Do not fine-tune. | Retrieval is enough. Fine-tuning can add wrong answers. |
 | DEC-7 | Use a section path for Chunks. | The Roadmap is a table of contents. Section search gives better context. |
+| DEC-8 | Build the video from the saved Lesson. Do not call the model again for the same Node. | The Lesson is already saved. A second model call adds cost and can give different text. |
+| DEC-9 | Use a third-party text-to-speech provider for the voice. Do not build a voice model. | A third-party provider is fast. It supports Bangla. It keeps the prototype cost low. |
+| DEC-10 | Use a slide renderer to make the video. Do not use a video model. | A slide renderer is cheap. The slides are simple text, formulas, and diagrams. |
+| DEC-11 | Save the Transcript with time codes. The Transcript is the source of truth for the video. | The Transcript links the voice, the slides, and the captions. |
 
 ## 17. Technical risks
 
@@ -372,3 +418,6 @@ The judge model must not be the model that made the content. A human set must ba
 | TR-3 | Prerequisite extraction is poor. | Use shared edges, a level-B check, and Learner edits. |
 | TR-4 | Bangla OCR is poor. | Test in M0. Show low-confidence pages. Let the Learner paste text. |
 | TR-5 | The model API changes or fails. | Keep model names in one file. Add retries. |
+| TR-6 | The text-to-speech provider does not support Bangla well. | Test voices in milestone M0. Choose a voice from the test. Let the Learner change the voice in Settings. |
+| TR-7 | The video build takes too long or fails. | Build the video on demand. Save it. Show a clear error if it fails. Let the Learner fall back to the Lesson text. |
+| TR-8 | The slides and the voice contradict each other. | Build both from the saved Lesson. Check that the Transcript matches the Voice text. |

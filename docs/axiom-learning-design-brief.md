@@ -7,7 +7,7 @@
 | Date | 2026-10-25 |
 | Owner | Obidur Rahman, NorthAxis |
 | Status | Draft for the prototype |
-| Related documents | AXL-PRD-001, AXL-FLOW-001 |
+| Related documents | AXL-PRD-001, AXL-FLOW-001, AXL-VIDEO-001 |
 
 Writing rules: This document follows the ASD-STE100 rules as closely as possible. Terms are in the PRD, Section 14.
 
@@ -130,13 +130,25 @@ The designer sets the values. Each text and background pair must meet the WCAG 2
 - For a written answer, show a text box and a counter of words.
 - Show the three scores as three small bars with a short note each.
 
-### 8.5 Upload and processing
+### 8.5 Tutorial Video player
+
+- Show the video at the top. The video plays the slides with the voice track.
+- Show captions under the video. The captions come from the Transcript.
+- Show the Transcript below the captions. Each line has a time code. The current line is highlighted as the voice speaks.
+- Show a slide list next to or below the Transcript. Each list item shows the slide title.
+- Show controls: play, pause, rewind, fast-forward, speed, mute.
+- A tap on a Transcript line jumps to that moment in the video.
+- A tap on a slide in the slide list jumps to that slide in the video.
+- Respect the "reduce motion" setting. Slide changes are slower when the setting is on.
+- Show the mark "General content" on a video that has no Material.
+
+### 8.6 Upload and processing
 
 - Show a drop area on a wide screen. Show buttons Take photo and Choose file on a phone.
 - Show the status of each file as a label and an icon.
 - Show the pages with low confidence as a link to a list.
 
-### 8.6 Exam scope
+### 8.7 Exam scope
 
 - Show each Topic with a checkbox and a weight bar.
 - Group the Topics by chapter. Let the Learner collapse a group.
