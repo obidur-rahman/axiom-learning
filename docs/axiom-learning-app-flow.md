@@ -7,7 +7,7 @@
 | Date | 2026-10-25 |
 | Owner | Obidur Rahman, NorthAxis |
 | Status | Draft for the prototype |
-| Related documents | AXL-PRD-001, AXL-DESIGN-001 |
+| Related documents | AXL-PRD-001, AXL-DESIGN-001, AXL-VIDEO-001 |
 
 Writing rules: This document follows the ASD-STE100 rules as closely as possible. Terms are in the PRD, Section 14.
 
@@ -32,6 +32,7 @@ This document shows how a Learner moves through the app. It lists the screens, t
 | SC-09 | Roadmap (graph) | Show the Roadmap as a graph. |
 | SC-10 | Roadmap (list) | Show the Roadmap as an ordered list. |
 | SC-11 | Node page | Show the Lesson, the check questions, and the actions. |
+| SC-11b | Tutorial Video | Show the video player, the Transcript, and the slide list. |
 | SC-12 | Diagnostic | Show 3 questions for a Bridge Node. |
 | SC-13 | Practice | Show multiple-choice and written practice. |
 | SC-14 | Tutor | Show the chat. |
@@ -47,6 +48,7 @@ Welcome -> Sign up / Log in -> Home
 Home -> New Course -> Upload Material -> Processing -> Topic list -> Exam scope -> Roadmap
 Home -> Premade Roadmap -> Roadmap
 Roadmap (graph or list) -> Node page -> Diagnostic or Practice
+Node page -> Tutorial Video
 Course menu: Roadmap | Tutor | Practice | Progress | Share
 Any screen -> Settings
 Shared link -> Shared Roadmap -> Log in -> Copy to my account -> Roadmap
@@ -209,8 +211,41 @@ Error state: A cancelled link shows "This link is not active".
 ### F15: Settings
 
 1. The Learner can change the language.
-2. The Learner can delete a Course.
-3. The Learner can delete the account. The app asks the Learner to confirm. The app then deletes all data.
+2. The Learner can change the voice for the Tutorial Videos.
+3. The Learner can turn on or off the "reduce motion" setting.
+4. The Learner can delete a Course.
+5. The Learner can delete the account. The app asks the Learner to confirm. The app then deletes all data.
+
+### F16: Watch a Tutorial Video
+
+1. The Learner opens the Node page.
+2. The Learner selects the video tab. The tab shows "Watch the video".
+3. If a saved video exists, the app shows the video player at once.
+4. If no video exists, the app shows a build button. The Learner selects Build the video.
+5. The app shows the building state. It shows the slides that are ready.
+6. The app shows the video player when the build is done.
+7. The Learner can play, pause, rewind, and fast-forward.
+
+The video player shows:
+- The video. The video shows the slides and the voice.
+- The captions. The captions come from the Transcript.
+- The Transcript. The Transcript shows the spoken words with time codes.
+- The slide list. The slide list shows the title of each slide.
+
+The Learner can tap a line in the Transcript to jump to that moment in the video.
+
+The Learner can tap a slide in the slide list to jump to that slide in the video.
+
+Error states:
+- The video build fails. The app shows a message and a Try again button. The Learner can fall back to the Lesson text.
+- The daily video limit is reached. The app shows the time when the limit resets.
+
+### F17: Change the video settings
+
+1. The Learner opens Settings.
+2. The Learner changes the voice.
+3. The Learner turns on or off the "reduce motion" setting.
+4. The change applies to the next video build. A saved video does not change.
 
 ## 5. Global states
 
@@ -221,6 +256,7 @@ Error state: A cancelled link shows "This link is not active".
 | Error | Show what happened and one action. |
 | Offline | Show "No network". Keep saved pages readable if possible. |
 | Limit reached | Show the limit and the reset time. |
+| Building video | Show a progress text. Show the slides that are ready. |
 
 ## 6. Language rules for screens
 

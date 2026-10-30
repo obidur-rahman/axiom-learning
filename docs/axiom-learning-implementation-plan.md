@@ -7,7 +7,7 @@
 | Date | 2026-10-25 |
 | Owner | Obidur Rahman, NorthAxis |
 | Status | Draft for the prototype |
-| Related documents | AXL-PRD-001, AXL-TRD-001, AXL-FLOW-001, AXL-DESIGN-001, AXL-SCHEMA-001 |
+| Related documents | AXL-PRD-001, AXL-TRD-001, AXL-FLOW-001, AXL-DESIGN-001, AXL-SCHEMA-001, AXL-VIDEO-001 |
 
 Writing rules: This document follows the ASD-STE100 rules as closely as possible. Terms are in the PRD, Section 14.
 
@@ -73,6 +73,9 @@ Task IDs show the milestone. Each task lists the check that proves it is done.
 | M0-5 | Write the model configuration file. | One file holds the model names for levels A and B. |
 | M0-6 | Estimate the cost for one Course. | A cost figure exists for the steps in the pipeline. |
 | M0-7 | Read the data terms of the model provider. | The result is written in the decision log. |
+| M0-8 | Test 2 or 3 text-to-speech providers on E7 (voice set). Test Bangla and English. | The best voice provider and the voice IDs are chosen. |
+| M0-9 | Test 2 slide-to-video renderers. Check the render time and the output size. | The best renderer is chosen. |
+| M0-10 | Read the data terms of the voice provider and the video renderer. | The result is written in the decision log. |
 
 Gate: If no model gives acceptable Bangla results, the team must change the plan. The options are to limit the first release to English, or to use a different model.
 
@@ -138,6 +141,9 @@ Gate: If the hand review shows that the Roadmaps are not useful, fix the extract
 | M4-9 | Add the prompt rule for Material text (FR-085). Test with a file that has a hidden instruction. | The Tutor ignores the instruction. |
 | M4-10 | Run test set E4. Record groundedness. | The result is in the log. |
 | M4-11 | Add the Lesson report and the new version (FR-064). | A report saves. A new Lesson replaces the old one. |
+| M4-12 | Add the Tutorial Video build step (TRD 5.8). The worker splits the Lesson into Slides, writes the Voice text, makes the Transcript, and renders the audio and the video. | A video builds for a Node in E6. |
+| M4-13 | Add the video save and reuse. The API looks for a saved video before it makes a job. | The second open is fast. |
+| M4-14 | Run test set E6 and E7. Check the Slides, the Voice text, the Transcript, and the voice quality. | The results are in the log. |
 
 ### M5: Practice, Premade Roadmaps, progress, sharing
 
@@ -175,7 +181,7 @@ M0 -> M1 -> M2 -> M3 -> M4 -> M5 -> M6
 
 - M2 needs the models and the value `N` from M0.
 - M3 needs the Roadmap engine from M2.
-- M4 needs the Chunks and the retrieval function.
+- M4 needs the Chunks, the retrieval function, and the TTS/video renderer choices from M0.
 - M5 needs the Topics and Lessons from M4.
 - M6 needs all P0 features.
 
@@ -186,7 +192,8 @@ M0 -> M1 -> M2 -> M3 -> M4 -> M5 -> M6
 | Unit | The engine rules (TRD 6.5), schemas, helpers | At each change to the engine |
 | Pipeline | Each step on the E1 Courses. Check the output with the schema. | At the end of M2 and M4 |
 | Evaluation | E2 to E5 and the measures in TRD 14 | M0, M2, M4, M5 |
-| End to end | One full flow: sign up, upload, Roadmap, Lesson, Tutor, Practice, share | At the end of M3, M5, M6 |
+| Evaluation (video) | E6 (videos) and E7 (voice quality) and the measures in TRD 14 | M4, M6 |
+| End to end | One full flow: sign up, upload, Roadmap, Lesson, Tutor, Practice, video, share | At the end of M3, M5, M6 |
 | Security | Section 8 | M6 |
 | Learner test | About 10 testers | M6 |
 
@@ -204,6 +211,7 @@ Model output can change between runs. Test with schemas and with score limits. D
 | SC-6 | Send many requests in a short time. | The limit stops the requests. |
 | SC-7 | Search the browser code for keys. | No key is present. |
 | SC-8 | Delete an account. | No row and no file remain. |
+| SC-9 | Open another user's video link. | The request fails. |
 
 ## 9. Release checklist
 
@@ -216,6 +224,8 @@ Model output can change between runs. Test with schemas and with score limits. D
 - The Bangla text is checked.
 - A backup of the database exists.
 - The feedback form is ready.
+- TTS voices for Bangla and English are tested.
+- Tutorial Videos play on 4G without error.
 
 ## 10. Risks and actions
 
@@ -227,6 +237,8 @@ Model output can change between runs. Test with schemas and with score limits. D
 | IR-4 | The free plan limits are too small. | Move to a small paid plan. |
 | IR-5 | The testers do not finish the flow. | Reduce the steps. Add help text. |
 | IR-6 | The model cost is above the budget. | Use level A more. Reduce the limits. |
+| IR-7 | Text-to-speech does not support Bangla well. | Test voices in M0. Limit the first release to English if needed. |
+| IR-8 | Video build takes too long or costs too much. | Build on demand. Save and reuse. Set daily limits. |
 
 ## 11. Cut list
 

@@ -7,7 +7,7 @@
 | Date | 2026-10-25 |
 | Owner | Obidur Rahman, NorthAxis |
 | Status | Draft for the prototype |
-| Related documents | AXL-TRD-001, AXL-FLOW-001, AXL-DESIGN-001, AXL-SCHEMA-001, AXL-PLAN-001 |
+| Related documents | AXL-TRD-001, AXL-FLOW-001, AXL-DESIGN-001, AXL-SCHEMA-001, AXL-PLAN-001, AXL-VIDEO-001 |
 
 Writing rules: This document follows the ASD-STE100 rules as closely as possible. Sentences are short. Each term has one meaning. See Section 14 for the terms.
 
@@ -22,6 +22,8 @@ This document states what the Axiom Learning prototype must do. It names the use
 Axiom Learning is a web app. It helps a Learner study only what the Learner needs.
 
 The Learner gives the app the Material for a Course. The app builds a Roadmap. The Roadmap is a tree of Nodes in a good study order. A Tutor answers questions about the Material. A Learner with no Material can start a Premade Roadmap.
+
+For each Node the app can also build a Tutorial Video. The video has three parts that play together: a slide deck, a voice track, and a transcript. The slides show the key points, formulas, and diagrams. The voice explains them. The transcript shows the spoken words so the Learner can read along, pause, and take notes.
 
 ## 3. Users
 
@@ -144,20 +146,36 @@ Priority: P0 means the prototype must have it. P1 means the prototype must have 
 | FR-055 | The Learner can attach a page or a note to a Node. | P2 | Later release. |
 | FR-056 | The app can suggest changes after an edit. | P2 | Later release. |
 
-### 8.6 Lessons and Diagnostics
+### 8.6 Tutorial Videos
 
 | ID | Requirement | Priority | Check |
 |---|---|---|---|
-| FR-060 | The app must build a Lesson when the Learner opens a Node for the first time. It must save the Lesson and use it again. | P0 | The second open is fast and has the same text. |
-| FR-061 | A Lesson must use the language of the Learner. If Material exists, the Lesson must show Citations to Material pages. | P0 | Each Lesson shows its sources. |
-| FR-062 | A Lesson for a Bridge Node must be shorter than a Lesson for a Core Node. | P1 | Bridge Lessons are shorter. |
-| FR-063 | The app must show math formulas correctly. | P0 | A test page with 10 formulas shows all of them. |
-| FR-064 | The Learner can report a Lesson and can ask for a new version. | P1 | A report is saved. A new version replaces the old one. |
-| FR-065 | Each Lesson must end with 3 check questions. | P1 | The questions show. |
-| FR-070 | Each Bridge Node must have a Diagnostic of 3 questions. A Learner who answers all 3 correctly marks the Node as Known. | P0 | A pass sets the status to Known. |
-| FR-071 | If a Node is Known, the app must not add its Prerequisites, unless another Node needs them. | P0 | The Roadmap shows fewer Nodes after a pass. |
+| FR-150 | The app must build a Tutorial Video for each Node. | P0 | A video opens for the Node. |
+| FR-151 | A Tutorial Video must have three parts that play together: a slide deck, a voice track, and a transcript. | P0 | All three parts play together. |
+| FR-152 | The slide deck must show the key points, the formulas, and a simple diagram of the concept. | P0 | Each slide has text and a formula or a diagram. |
+| FR-153 | The voice track must speak the text that explains the slides. The voice must not read every word on the slide. The slide shows the key points; the voice does the rest. | P0 | The voice explains the slide. The slide shows the key points. |
+| FR-154 | The transcript must show the spoken words. The Learner can tap a word in the transcript to jump to that moment in the video. | P1 | A tap on a transcript line moves the video. |
+| FR-155 | The Learner can pause, rewind, and fast-forward the video. | P0 | The controls work. |
+| FR-156 | The video must save and play again without a new build. | P0 | The second play is fast. |
+| FR-157 | The video must use the language of the Learner. | P0 | A video in Bangla plays in Bangla. |
+| FR-158 | The video must show captions for the voice. | P0 | Captions show on the video. |
+| FR-159 | The video must respect the "reduce motion" setting. | P1 | Slide changes are slower. |
+| FR-160 | The video must be built from the same source as the Lesson. The slides and the voice must not contradict the Lesson text. | P0 | The video matches the Lesson. |
 
-### 8.7 Tutor
+### 8.7 Lessons and Diagnostics
+
+| ID | Requirement | Priority | Check |
+|---|---|---|---|
+| FR-170 | The app must build a Lesson when the Learner opens a Node for the first time. It must save the Lesson and use it again. | P0 | The second open is fast and has the same text. |
+| FR-171 | A Lesson must use the language of the Learner. If Material exists, the Lesson must show Citations to Material pages. | P0 | Each Lesson shows its sources. |
+| FR-172 | A Lesson for a Bridge Node must be shorter than a Lesson for a Core Node. | P1 | Bridge Lessons are shorter. |
+| FR-173 | The app must show math formulas correctly. | P0 | A test page with 10 formulas shows all of them. |
+| FR-174 | The Learner can report a Lesson and can ask for a new version. | P1 | A report is saved. A new version replaces the old one. |
+| FR-175 | Each Lesson must end with 3 check questions. | P1 | The questions show. |
+| FR-176 | Each Bridge Node must have a Diagnostic of 3 questions. A Learner who answers all 3 correctly marks the Node as Known. | P0 | A pass sets the status to Known. |
+| FR-177 | If a Node is Known, the app must not add its Prerequisites, unless another Node needs them. | P0 | The Roadmap shows fewer Nodes after a pass. |
+
+### 8.8 Tutor
 
 | ID | Requirement | Priority | Check |
 |---|---|---|---|
@@ -168,7 +186,7 @@ Priority: P0 means the prototype must have it. P1 means the prototype must have 
 | FR-084 | The Learner can choose the mode "Guide me". In this mode the Tutor asks guiding questions before it gives the answer. | P1 | The Tutor asks at least one question first. |
 | FR-085 | The Tutor must treat Material text as data. It must not follow instructions that are inside the Material. | P0 | A test file with a hidden instruction does not change the Tutor. |
 
-### 8.8 Practice
+### 8.9 Practice
 
 | ID | Requirement | Priority | Check |
 |---|---|---|---|
@@ -210,6 +228,9 @@ The TRD gives the details. These are the main requirements.
 | NFR-005 | Mobile use | Works on a 4G network and on a screen 360 pixels wide |
 | NFR-006 | Accessibility | Meets WCAG 2.2 level AA for contrast and keyboard use |
 | NFR-007 | Running cost | Inside the free plans, except model use |
+| NFR-008 | Time to build the first Tutorial Video that is not saved | Less than 30 seconds |
+| NFR-009 | Time to the first frame of a saved Tutorial Video | Less than 2 seconds |
+| NFR-010 | Video play on a slow network | Works on a 4G network. The video streams. |
 
 The targets are proposals. The team must measure them in the prototype.
 
@@ -222,6 +243,8 @@ The targets are proposals. The team must measure them in the prototype.
 | S3 | Tutor answers that cite a correct page, when the Material has the answer | At least 70 percent |
 | S4 | Tester rating of Roadmap relevance | At least 4 out of 5 |
 | S5 | Model cost for each active tester each week | The team sets the limit after the cost test |
+| S6 | Tester rating of Tutorial Video quality | At least 4 out of 5 |
+| S7 | Tutorial Videos that play without error | At least 95 percent |
 
 ## 11. Risks
 
@@ -234,6 +257,9 @@ The targets are proposals. The team must measure them in the prototype.
 | R5 | One bad saved Lesson reaches many Learners. | Add a report button. Let the app build a new version. |
 | R6 | Model cost is too high. | Use two model levels. Save results. Build Lessons only when needed. Set daily limits. |
 | R7 | Learners upload copyright Material. | Let each Learner use only their own Material. Share only the Roadmap structure. |
+| R8 | A Tutorial Video costs too much to build. | Build the video only when the Learner opens the Node. Save it. Reuse it. Set a daily limit on video builds. |
+| R9 | The voice does not speak Bangla well. | Test voices in milestone M0. Choose a voice from the test. Let the Learner change the voice in Settings. |
+| R10 | The slides and the voice contradict each other. | Build both from the same Lesson text. Check that the transcript matches the voice. |
 
 ## 12. Assumptions
 
@@ -273,3 +299,7 @@ The targets are proposals. The team must measure them in the prototype.
 | Citation | A link from an answer to a page of the Material. |
 | Override | An edit of the Learner that the app keeps when it rebuilds the Roadmap. |
 | Premade Roadmap | A Roadmap that the team made. It needs no Material. |
+| Tutorial Video | A video that teaches one Node. It has a slide deck, a voice track, and a transcript. |
+| Slide | One screen in a Tutorial Video. It shows a key point, a formula, or a diagram. |
+| Voice track | The speech that explains the slides in a Tutorial Video. |
+| Transcript | The written words of the voice track. The Learner can tap a word to jump to that moment. |

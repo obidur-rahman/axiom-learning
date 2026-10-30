@@ -7,7 +7,7 @@
 | Date | 2026-10-25 |
 | Owner | Obidur Rahman, NorthAxis |
 | Status | Draft for the prototype |
-| Related documents | AXL-TRD-001, AXL-PRD-001 |
+| Related documents | AXL-TRD-001, AXL-PRD-001, AXL-VIDEO-001 |
 
 Writing rules: This document follows the ASD-STE100 rules as closely as possible. Terms are in the PRD, Section 14.
 
@@ -389,6 +389,59 @@ create table tutor_messages (
 );
 ```
 
+### 4.12 Tutorial Videos
+
+```sql
+create table tutorial_videos (
+  id uuid primary key default gen_random_uuid(),
+  scope text not null check (scope in ('course','shared')),
+  course_id uuid references courses(id) on delete cascade,
+  topic_id uuid references topics(id) on delete cascade,
+  shared_concept_id uuid references shared_concepts(id) on delete cascade,
+  language text not null check (language in ('bn','en')),
+  level text not null check (level in ('school','university','general')),
+  depth text not null check (depth in ('core','bridge')),
+  script_md text not null,
+  voice_id text,
+  duration_seconds int,
+  status text not null default 'queued'
+    check (status in ('queued','generating','ready','failed')),
+  model_id text,
+  prompt_version text,
+  created_at timestamptz not null default now()
+);
+
+create unique index tutorial_videos_active_idx
+  on tutorial_videos (topic_id, language, level, depth)
+  where status = 'ready' and scope = 'course';
+create unique index tutorial_videos_active_shared_idx
+  on tutorial_videos (shared_concept_id, language, level, depth)
+  where status = 'ready' and scope = 'shared';
+
+create table tutorial_slides (
+  id uuid primary key default gen_random_uuid(),
+  tutorial_video_id uuid not null references tutorial_videos(id) on delete cascade,
+  slide_index int not null,
+  title text,
+  body_md text,
+  formulas jsonb,
+  diagram_hint text,
+  start_ms int not null,
+  end_ms int not null,
+  created_at timestamptz not null default now()
+);
+
+create table tutorial_transcripts (
+  id uuid primary key default gen_random_uuid(),
+  tutorial_video_id uuid not null references tutorial_videos(id) on delete cascade,
+  segment_index int not null,
+  text text not null,
+  start_ms int not null,
+  end_ms int not null,
+  created_at timestamptz not null default now()
+);
+```
+
 ### 4.12 Sharing
 
 ```sql
@@ -496,7 +549,7 @@ Rules for each table group:
 |---|---|
 | `profiles` | A user reads and writes the row where `id = auth.uid()`. |
 | `courses` | A user reads and writes the rows where `owner_id = auth.uid()`. |
-| Tables with `course_id` (`materials`, `material_pages`, `topics`, `topic_edges`, `topic_weights`, `exam_scope_rules`, `chunks`, `past_questions`, `roadmap_versions`, `roadmap_nodes`, `node_overrides`, `practice_items`, `lessons` with scope `course`) | A user reads and writes a row if the user owns the Course of the row. |
+| Tables with `course_id` (`materials`, `material_pages`, `topics`, `topic_edges`, `topic_weights`, `exam_scope_rules`, `chunks`, `past_questions`, `roadmap_versions`, `roadmap_nodes`, `node_overrides`, `practice_items`, `lessons` with scope `course`, `tutorial_videos`, `tutorial_slides`, `tutorial_transcripts`) | A user reads and writes a row if the user owns the Course of the row. |
 | `user_progress`, `diagnostic_attempts`, `practice_attempts`, `tutor_threads` | A user reads and writes the rows where `user_id = auth.uid()`. |
 | `tutor_messages` | A user reads and writes the rows of the threads that the user owns. |
 | `shared_concepts`, `shared_prereq_edges`, `lessons` with scope `shared` | All logged-in users can read. Only the server role can write. |
@@ -527,6 +580,7 @@ The shared view of a Roadmap (screen SC-17) is read through the server with a va
 | Bucket | Content | Access |
 |---|---|---|
 | `materials` | Uploaded files. Path: `{owner_id}/{course_id}/{material_id}/{file}` | Private. The owner reads with a signed link that expires. |
+| `videos` | Tutorial videos. Path: `{owner_id}/{course_id}/{tutorial_video_id}/{file}` | Private. The owner reads with a signed link that expires. |
 
 A storage policy must allow a user to access only the path that begins with the own `owner_id`.
 
@@ -538,6 +592,7 @@ A storage policy must allow a user to access only the path that begins with the 
 | Delete a Course | Delete all rows with the `course_id`. Delete all files of the Course. |
 | Delete an account | Delete the profile. Cascade deletes all data. Delete all files. |
 | Cancel a share link | Set `revoked` to true. |
+| Delete a Tutorial Video | Delete its Slides, Transcripts, and the video file. |
 
 Shared concepts and shared edges hold no user text. They stay after a deletion.
 
@@ -553,7 +608,7 @@ Shared concepts and shared edges hold no user text. They stay after a deletion.
 8. `user_progress`, `diagnostics`, `diagnostic_attempts`.
 9. `lessons`, `lesson_reports`.
 10. `practice_items`, `practice_attempts`.
-11. `tutor_threads`, `tutor_messages`.
+11. `tutor_threads`, `tutor_messages`, `tutorial_videos`, `tutorial_slides`, `tutorial_transcripts`.
 12. `share_links`.
 13. `jobs`, `usage_events`, `usage_limits`.
 14. RLS policies and storage policies.
