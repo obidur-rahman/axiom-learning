@@ -36,39 +36,40 @@ These rules come from the work in this project and from the research papers that
 
 The system has five parts.
 
-1. **Web app.** The browser interface. It runs on Vercel.
-2. **API.** The server routes in the web app. They check the login and write jobs.
-3. **Database and storage.** Supabase. It has Postgres, pgvector, login, and file storage.
-4. **Worker.** A Node process. It reads jobs from the database and runs the pipeline.
-5. **Model provider.** An outside API for text, vision, and embeddings.
+1. **Desktop app.** The Tauri app shell with a webview. It runs on the computer of the Learner.
+2. **API (in-process).** The routes inside the app. They check the optional login and write jobs.
+3. **Database and storage.** Local SQLite for own data. Supabase is optional, for login, Premade Roadmaps, and sharing.
+4. **Worker (in-process).** A job queue inside the app. It runs the pipeline.
+5. **Model provider.** A pluggable OpenAI-compatible endpoint: hosted (OpenRouter, OpenAI) or local (Ollama, LM Studio, vLLM). Configured by base URL, API key, and model names.
 
 ```
-Browser  ->  Web app and API  ->  Postgres (data, vectors, job queue)
-                                        ^
-                                        |
-                       Worker  <--  jobs  -->  Model provider
-                                        |
-                                  File storage
+Desktop app (webview)  ->  in-process API  ->  local SQLite
+                                                  ^
+                                                  |
+                        in-process worker  <--  jobs  -->  Model provider (pluggable)
+                                                  |
+                                       optional Supabase (auth, premade, share)
 ```
 
-The web app and the worker share one TypeScript package named `engine`. The package has the pruning code and the data schemas.
+The app and the worker share one TypeScript package named `engine`. The package has the pruning code and the data schemas. The AI layer is a separate package named `ai` with an OpenAI-compatible client.
 
 ## 4. Technology
 
 | Area | Choice | Note |
 |---|---|---|
-| Web framework | Next.js (App Router), TypeScript, Tailwind CSS | The team already uses these tools. |
+| Desktop framework | Tauri (thin Rust shell) | Small bundle. Fast startup. Rust only for window, dialogs, and key storage. |
+| Web framework | Next.js (static export), TypeScript, Tailwind CSS | Reused in the Tauri webview. |
 | Graph view | React Flow | Handles drag, add, and delete of Nodes. |
 | Math display | KaTeX | Shows formulas. |
 | Language support | A translation file for Bangla and English | One file for each language. |
-| Database | Supabase Postgres with the pgvector extension | One database for all data. |
-| Search | HNSW vector index plus Postgres full-text and trigram search | See Section 7. |
-| Login | Supabase Auth | Email and password. |
-| File storage | Supabase Storage | Private bucket. Use signed links. |
-| Job queue | A table in Postgres | No extra service. |
-| Worker host | A free or low-cost container host | The team decides in milestone M1. |
+| Local database | SQLite (via Tauri) | Stores courses, materials, roadmap, lessons, progress. |
+| Optional cloud | Supabase (auth, premade, share) | Used only when the Learner signs in. |
+| Search | HNSW vector index plus SQLite FTS and trigram search | See Section 7. |
+| Login | Supabase Auth (optional) | Email and password. Only for premade and sharing. |
+| File storage | Local file system (Tauri) | Private folder of the app. |
+| Job queue | In-process table | No extra service. |
+| AI provider | OpenAI-compatible client | Covers hosted APIs and local endpoints. |
 | Validation | Zod schemas | Each model output must pass a schema. |
-| Hosting | Vercel free plan for the web app | Check the current limits. |
 
 ## 5. Data pipeline
 

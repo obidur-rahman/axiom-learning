@@ -40,6 +40,7 @@ This document shows how a Learner moves through the app. It lists the screens, t
 | SC-16 | Share | Make, copy, and cancel a share link. |
 | SC-17 | Shared Roadmap | Show a shared Roadmap to a person with the link. |
 | SC-18 | Settings | Language, account, and data deletion. |
+| SC-19 | AI provider | Base URL, API key, model, capabilities, auto-detect. |
 
 ## 3. Navigation map
 

@@ -24,19 +24,20 @@ This document gives the work plan for the prototype. It lists the milestones, th
 - The first work is a test of models and OCR (milestone M0).
 - The Roadmap engine is built and tested as code before the screens.
 - A group of about 10 testers uses the prototype in the last week.
+- The prototype is a desktop app. It needs no account to use own Material.
 
 ## 3. Repository layout
 
 ```
 axiom-learning/
   apps/
-    web/            Next.js app (screens and API routes)
-    worker/         Node worker (job runner and pipeline steps)
+    desktop/        Tauri app (webview + Rust shell)
   packages/
     engine/         Pruning rules, schemas (Zod), shared types
+    ai/             OpenAI-compatible provider client, capability probe
     prompts/        Prompt files with version numbers
   supabase/
-    migrations/     SQL files in the order in AXL-SCHEMA-001
+    migrations/     SQL files for optional cloud (auth, premade, share)
     seed/           Premade Roadmap data
   eval/
     sets/           E1 to E5 test sets

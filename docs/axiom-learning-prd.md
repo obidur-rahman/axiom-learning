@@ -19,9 +19,13 @@ This document states what the Axiom Learning prototype must do. It names the use
 
 ## 2. Product summary
 
-Axiom Learning is a web app. It helps a Learner study only what the Learner needs.
+Axiom Learning is a desktop app. It helps a Learner study only what the Learner needs.
 
 The Learner gives the app the Material for a Course. The app builds a Roadmap. The Roadmap is a tree of Nodes in a good study order. A Tutor answers questions about the Material. A Learner with no Material can start a Premade Roadmap.
+
+The app runs on the computer of the Learner. It needs no account to use own Material. An account is optional. It is needed to fetch Premade Roadmaps and shared Roadmaps.
+
+AI runs through one pluggable provider. The Learner can use a hosted API key (OpenRouter or OpenAI) or a local OpenAI-compatible endpoint (Ollama, LM Studio, vLLM). The app auto-detects a local endpoint on startup. Features expand or shrink based on model capabilities.
 
 For each Node the app can also build a Tutorial Video. The video has three parts that play together: a slide deck, a voice track, and a transcript. The slides show the key points, formulas, and diagrams. The voice explains them. The transcript shows the spoken words so the Learner can read along, pause, and take notes.
 
@@ -69,7 +73,7 @@ The review used store pages and articles. It did not use the tools themselves. T
 
 ### Non-goals for the prototype
 
-- Native phone apps. The prototype is a website.
+- Native phone apps. The prototype is a desktop app.
 - Payments.
 - Points, streaks, and other game features.
 - Voice and video.
@@ -213,7 +217,7 @@ Priority: P0 means the prototype must have it. P1 means the prototype must have 
 |---|---|---|---|
 | FR-130 | The app must set a daily limit for each Learner on Tutor messages, uploads, and Lesson builds. | P0 | The limit stops further use. |
 | FR-131 | The app must show a clear message when a limit is reached. | P0 | The message shows the time when the limit resets. |
-| FR-140 | The app must work on phones and on desktop computers. The Learner can install it as a Progressive Web App. | P1 | The install prompt works on a phone. |
+| FR-140 | The app is a desktop app. It installs from the website. It runs on Windows, macOS, and Linux. | P1 | The app installs and runs. |
 
 ## 9. Non-functional requirements
 

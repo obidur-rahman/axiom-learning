@@ -15,7 +15,7 @@ Writing rules: This document follows the ASD-STE100 rules as closely as possible
 
 ## 1. Purpose
 
-This document defines the database for the prototype. The database is Supabase Postgres with the pgvector extension.
+This document defines the database for the prototype. The prototype uses local SQLite for own data. Supabase Postgres with pgvector is optional. It is used for login, Premade Roadmaps, and sharing.
 
 ## 2. Rules
 
