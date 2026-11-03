@@ -80,7 +80,7 @@ Each step is a job. A job has a status: queued, running, done, or failed. A fail
 1. The API saves the file in storage and makes a Material record.
 2. The worker makes a text for each page. The method depends on the page.
 3. For a PDF with a text layer, the worker reads the text.
-4. For a scan or a photo, the worker uses OCR or a vision model. The team chooses in milestone M0.
+4. For a scan or a photo, the worker uses OCR or a vision model. The default OCR is `tesseract.js` (offline, no download). If the configured AI provider has vision capability, the worker can use it instead. The team compares the two in milestone M0. The method with fewer errors wins for that page type. The paper "Lost in OCR Translation?" found that OCR pipelines generalize better to unseen documents than a vision retriever. The paper did not test handwriting in the abstract. The team must test it.
 5. The worker saves the text, the page number, the method, and a confidence value in `material_pages`.
 6. The worker marks each page with low confidence.
 
@@ -92,12 +92,14 @@ OCR test (milestone M0): Compare two methods on 10 real pages. Include Bangla pa
 2. A level-A model returns a list of Topics as JSON. Each Topic has a title, a parent, and an order.
 3. The code checks the JSON with a Zod schema.
 4. If the model returns bad JSON, the worker tries again up to 2 times.
-5. If there is no syllabus, the worker builds the list from the notes. The app shows a warning.
+5. If it still fails, the app offers to retry with a hosted model. The Learner must have an API key.
+6. If there is no syllabus, the worker builds the list from the notes. The app shows a warning.
 
 ### 5.3 Step 3: Make Chunks
 
 1. The worker splits the pages by section. It uses the Topic list and the headings.
-2. Each Chunk has 200 to 500 tokens. The limits are proposals.
+2. If no headings are found, the worker splits into fixed-size chunks of 200 to 500 tokens.
+3. Each Chunk has 200 to 500 tokens. The limits are proposals.
 3. Each Chunk keeps its file, page range, section path, and Topic.
 4. The worker removes exact copies with a content hash.
 5. The worker removes near copies. A near copy has a cosine similarity above 0.95 with another Chunk in the same Course. The worker keeps one Chunk and lists the other pages as extra sources.
