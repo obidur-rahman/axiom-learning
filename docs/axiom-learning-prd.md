@@ -102,6 +102,7 @@ Priority: P0 means the prototype must have it. P1 means the prototype must have 
 | FR-001 | The app must let a Learner sign up and log in with email and password. | P0 | A new user makes an account and logs in. |
 | FR-002 | The app must let a Learner choose Bangla or English for the screens and for made content. | P0 | The Learner changes the language. All screens change. |
 | FR-003 | The app must let a Learner delete the account and all stored data. | P1 | After deletion, no data of the Learner remains. |
+| FR-004 | The app must let a Learner switch between a light theme and a dark theme. The dark theme is the first option. | P0 | The theme changes on all screens. |
 
 ### 8.2 Courses and Material
 
