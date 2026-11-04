@@ -21,6 +21,7 @@ import {
 } from '../lib/extract';
 import { loadConfig } from '../lib/provider';
 import { getDb } from '../lib/db';
+import { loadPrefs, usePrefs } from '../lib/prefs';
 
 type DbHandle = Awaited<ReturnType<typeof getDb>>;
 
@@ -51,6 +52,7 @@ function toPagePatch(page: ExtractedPage) {
  * afterwards the paste fallback always works.
  */
 export function UploadPanel({ courseId }: { courseId: string }) {
+  const prefs = usePrefs();
   const [items, setItems] = useState<Item[]>([]);
   const [read, setRead] = useState<ReadState>({ phase: 'idle', message: '' });
   const [pasteFor, setPasteFor] = useState<number | null>(null);
@@ -87,10 +89,8 @@ export function UploadPanel({ courseId }: { courseId: string }) {
       const db = await getDb();
       const extractors = makeAppExtractors(loadConfig);
       for (const file of Array.from(files)) {
-        if (file.size > 20 * 1024 * 1024) {
-          setRead({ phase: 'error', message: `${file.name} is over the 20 MB limit.` });
-          continue;
-        }
+        // Files stay on this machine. Let the local reader handle the size
+        // instead of rejecting a PDF before it has tried to read it.
         const material = await db.materials.createMaterial(db.driver, {
           courseId,
           kind: uploadKind,
@@ -131,10 +131,13 @@ export function UploadPanel({ courseId }: { courseId: string }) {
             pageCount: pages.length,
           });
           await enqueue(db.driver, 'build_topics', { courseId });
+          if (prefs.autoRebuildRoadmap) {
+            await enqueue(db.driver, 'build_roadmap', { courseId });
+          }
           // Best effort: with an embedding model configured, store page
           // vectors so tutor/practice retrieval upgrades to cosine search.
           const desired = loadConfig !== undefined ? await loadConfig() : null;
-          if (desired !== null && desired.embedModel !== undefined) {
+          if (desired !== null && desired.embedModel !== undefined && prefs.autoEmbedPages) {
             try {
               const count = await embedAndStorePages(
                 db.driver,
@@ -164,7 +167,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
       if (fileInput.current !== null) fileInput.current.value = '';
       await load();
     },
-    [courseId, load, uploadKind],
+    [courseId, load, uploadKind, prefs.autoRebuildRoadmap, prefs.autoEmbedPages],
   );
 
   /** FR-023: re-read one page with the vision model (needs the file in memory). */
@@ -236,6 +239,9 @@ export function UploadPanel({ courseId }: { courseId: string }) {
         },
       ]);
       await enqueue(db.driver, 'build_topics', { courseId });
+      if (loadPrefs().autoRebuildRoadmap) {
+        await enqueue(db.driver, 'build_roadmap', { courseId });
+      }
       setRead({ phase: 'done', message: `Page ${pageNumber} replaced.` });
       setPasteFor(null);
       setPasteText('');
@@ -270,7 +276,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
           <select
             value={uploadKind}
             onChange={(event) => setUploadKind(event.target.value as typeof uploadKind)}
-            className="rounded-[10px] border border-border bg-surface px-2 py-1.5 text-xs text-text"
+            className="rounded-[var(--radius)] border border-border bg-surface px-2 py-1.5 text-xs text-text"
           >
             <option value="syllabus">Syllabus</option>
             <option value="notes">Notes</option>
@@ -281,7 +287,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
         </label>
         <button
           onClick={() => fileInput.current?.click()}
-          className="rounded-[10px] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90"
+          className="rounded-[var(--radius)] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90"
         >
           Add material
         </button>
@@ -292,7 +298,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Find in pages..."
           title="Search the text of every read page"
-          className="ml-auto w-full max-w-xs rounded-[10px] border border-border bg-surface px-3 py-2 text-sm"
+          className="ml-auto w-full max-w-xs rounded-[var(--radius)] border border-border bg-surface px-3 py-2 text-sm"
         />
       </div>
 
@@ -308,7 +314,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
             }),
         );
         return (
-          <section className="flex flex-col gap-2 rounded-[10px] border border-border bg-surface p-3" aria-label="Search results">
+          <section className="flex flex-col gap-2 rounded-[var(--radius)] border border-border bg-surface p-3" aria-label="Search results">
             <p className="text-xs text-text-muted">
               {hits.length === 0 ? 'No page contains' : `Found on ${hits.length} page(s):`}
               <span className="ml-1 text-text">“{query.trim()}”</span>
@@ -336,9 +342,9 @@ export function UploadPanel({ courseId }: { courseId: string }) {
 
       <ul className="flex flex-col gap-3">
         {items.map(({ material, pages }) => {
-          const flagged = pages.filter((page) => page.lowConfidence);
+          const flagged = prefs.flagLowConfidence ? pages.filter((page) => page.lowConfidence) : [];
           return (
-            <li key={material.id} className="rounded-[10px] border border-border bg-surface p-3">
+            <li key={material.id} className="rounded-[var(--radius)] border border-border bg-surface p-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">{material.kind.toUpperCase()}</p>
@@ -350,7 +356,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                 </div>
                 <button
                   onClick={() => void handleDelete(material.id)}
-                  className="rounded-[10px] border border-border px-3 py-1.5 text-xs hover:border-danger hover:text-danger"
+                  className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs hover:border-danger hover:text-danger"
                 >
                   Delete
                 </button>
@@ -369,7 +375,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                       <span className="flex gap-2">
                         <button
                           onClick={() => void handleVisionPage(material.id, page.pageNumber)}
-                          className="rounded-[10px] border border-border px-2 py-1 hover:border-accent"
+                          className="rounded-[var(--radius)] border border-border px-2 py-1 hover:border-accent"
                         >
                           Read with vision
                         </button>
@@ -379,7 +385,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                             setPasteFor(page.pageNumber);
                             setPasteText('');
                           }}
-                          className="rounded-[10px] border border-border px-2 py-1 hover:border-accent"
+                          className="rounded-[var(--radius)] border border-border px-2 py-1 hover:border-accent"
                         >
                           Paste text
                         </button>
@@ -390,13 +396,13 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                   {activeMaterialId === material.id &&
                     pasteFor !== null &&
                     flagged.some((page) => page.pageNumber === pasteFor) && (
-                      <div className="flex flex-col gap-2 rounded-[10px] border border-border p-2">
+                      <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-border p-2">
                         <textarea
                           value={pasteText}
                           onChange={(event) => setPasteText(event.target.value)}
                           rows={4}
                           placeholder={`Paste page ${pasteFor} text here...`}
-                          className="flex-1 rounded-[10px] border border-border bg-bg px-2 py-1 text-sm outline-none focus:border-accent"
+                          className="flex-1 rounded-[var(--radius)] border border-border bg-bg px-2 py-1 text-sm outline-none focus:border-accent"
                         />
                         <div className="flex gap-2">
                           <button
@@ -409,13 +415,13 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                                 await handlePaste(db, material.id, pasteFor, pasteText);
                               })();
                             }}
-                            className="rounded-[10px] bg-accent px-3 py-1 text-xs text-accent-contrast disabled:opacity-50"
+                            className="rounded-[var(--radius)] bg-accent px-3 py-1 text-xs text-accent-contrast disabled:opacity-50"
                           >
                             Replace page
                           </button>
                           <button
                             onClick={() => setPasteFor(null)}
-                            className="rounded-[10px] border border-border px-3 py-1 text-xs"
+                            className="rounded-[var(--radius)] border border-border px-3 py-1 text-xs"
                           >
                             Cancel
                           </button>
@@ -428,7 +434,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
           );
         })}
         {items.length === 0 && (
-          <li className="rounded-[10px] border border-border bg-surface p-4 text-sm text-text-muted">
+          <li className="rounded-[var(--radius)] border border-border bg-surface p-4 text-sm text-text-muted">
             No material yet. Add the syllabus first, then notes and past question papers.
           </li>
         )}
@@ -453,7 +459,7 @@ function RebuildButton({ courseId }: { courseId: string }) {
           }
         })();
       }}
-      className="rounded-[10px] border border-border px-4 py-2 text-sm hover:border-accent disabled:opacity-50"
+      className="rounded-[var(--radius)] border border-border px-4 py-2 text-sm hover:border-accent disabled:opacity-50"
     >
       Rebuild roadmap
     </button>

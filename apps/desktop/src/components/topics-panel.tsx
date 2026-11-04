@@ -148,19 +148,19 @@ export function TopicsPanel({ courseId }: { courseId: string }) {
             if (event.key === 'Enter') void addTopic();
           }}
           placeholder="Add a topic manually"
-          className="flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+          className="flex-1 rounded-[var(--radius)] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
         />
         <button
           onClick={() => void addTopic()}
           disabled={newTitle.trim() === ''}
-          className="rounded-[10px] border border-border px-3 py-2 text-sm hover:border-accent disabled:opacity-40"
+          className="rounded-[var(--radius)] border border-border px-3 py-2 text-sm hover:border-accent disabled:opacity-40"
         >
           Add
         </button>
         <button
           onClick={() => void refresh()}
           disabled={busy}
-          className="rounded-[10px] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90 disabled:opacity-50"
+          className="rounded-[var(--radius)] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90 disabled:opacity-50"
         >
           {busy ? 'Applying...' : 'Apply to roadmap'}
         </button>
@@ -174,7 +174,7 @@ export function TopicsPanel({ courseId }: { courseId: string }) {
           return (
             <li
               key={topic.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-surface p-3"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-surface p-3"
             >
               <div className="min-w-0 flex-1">
                 <p className={`text-sm ${topic.excluded ? 'text-text-muted line-through' : ''}`}>
@@ -198,7 +198,7 @@ export function TopicsPanel({ courseId }: { courseId: string }) {
                 </label>
                 <button
                   onClick={() => void markSkip(topic.id)}
-                  className={`rounded-[10px] border px-2 py-1 text-xs ${
+                  className={`rounded-[var(--radius)] border px-2 py-1 text-xs ${
                     skipped ? 'border-known' : 'border-border hover:border-warning'
                   }`}
                 >
@@ -206,7 +206,7 @@ export function TopicsPanel({ courseId }: { courseId: string }) {
                 </button>
                 <button
                   onClick={() => void deleteTopic(topic.id)}
-                  className="rounded-[10px] border border-border px-2 py-1 text-xs hover:border-danger hover:text-danger"
+                  className="rounded-[var(--radius)] border border-border px-2 py-1 text-xs hover:border-danger hover:text-danger"
                 >
                   Delete
                 </button>
@@ -215,7 +215,7 @@ export function TopicsPanel({ courseId }: { courseId: string }) {
           );
         })}
         {topics.length === 0 && (
-          <li className="rounded-[10px] border border-border bg-surface p-4 text-sm text-text-muted">
+          <li className="rounded-[var(--radius)] border border-border bg-surface p-4 text-sm text-text-muted">
             No topics yet. Read material first, or add topics manually above.
           </li>
         )}

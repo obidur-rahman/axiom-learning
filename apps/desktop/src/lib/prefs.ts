@@ -1,7 +1,8 @@
 /**
- * Local app preferences: theme (light / dark / follow system), profile and
- * study defaults. Stored in localStorage so they survive restarts and apply
- * before the database is open; nothing here leaves the device.
+ * Local app preferences: theme, aero surface options, profile, study defaults
+ * and the behaviour switches used across the app. Stored in localStorage so
+ * they survive restarts and apply before the database is open. Nothing here
+ * leaves the device.
  */
 import { useSyncExternalStore } from 'react';
 import { PREFS_STORAGE_KEY } from './prefs-storage';
@@ -9,27 +10,91 @@ import { PREFS_STORAGE_KEY } from './prefs-storage';
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type StudyDepth = 'core' | 'bridge';
 export type PrefsLanguage = 'en' | 'bn' | 'mixed';
+export type CourseTab = 'material' | 'topics' | 'roadmap' | 'lessons' | 'tutor' | 'practice' | 'progress';
+export type AccentName =
+  | 'blue'
+  | 'mauve'
+  | 'green'
+  | 'teal'
+  | 'peach'
+  | 'red'
+  | 'pink'
+  | 'yellow'
+  | 'sapphire';
+
+export const ACCENT_NAMES: AccentName[] = [
+  'blue',
+  'mauve',
+  'green',
+  'teal',
+  'peach',
+  'red',
+  'pink',
+  'yellow',
+  'sapphire',
+];
 
 export interface Prefs {
+  /* Appearance */
   theme: ThemeMode;
+  accent: AccentName;
+  glass: boolean;
+  sharp: boolean;
+  compact: boolean;
+  reduceMotion: boolean;
+  /* Profile */
   displayName: string;
   language: PrefsLanguage;
+  /* Study defaults */
   defaultBridgeDepth: number;
   defaultLessonDepth: StudyDepth;
-  reduceMotion: boolean;
+  defaultCourseTab: CourseTab;
+  /* Behaviour */
+  showPercent: boolean;
+  showCountdown: boolean;
+  confirmDelete: boolean;
+  showCitationPages: boolean;
+  showSkippedInPlan: boolean;
+  tutorGuideDefault: boolean;
+  autoKnownOnStrongScore: boolean;
+  /* Materials */
+  jobToasts: boolean;
+  autoRebuildRoadmap: boolean;
+  autoEmbedPages: boolean;
+  flagLowConfidence: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
   theme: 'system',
+  accent: 'mauve',
+  glass: true,
+  sharp: false,
+  compact: false,
+  reduceMotion: false,
   displayName: '',
   language: 'en',
   defaultBridgeDepth: 2,
   defaultLessonDepth: 'core',
-  reduceMotion: false,
+  defaultCourseTab: 'material',
+  showPercent: true,
+  showCountdown: true,
+  confirmDelete: true,
+  showCitationPages: true,
+  showSkippedInPlan: false,
+  tutorGuideDefault: false,
+  autoKnownOnStrongScore: false,
+  jobToasts: true,
+  autoRebuildRoadmap: true,
+  autoEmbedPages: true,
+  flagLowConfidence: true,
 };
 
 let cache: Prefs | null = null;
 const listeners = new Set<() => void>();
+
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
 
 function sanitize(raw: unknown): Prefs {
   const value = (raw ?? {}) as Partial<Prefs>;
@@ -37,18 +102,47 @@ function sanitize(raw: unknown): Prefs {
     value.theme === 'light' || value.theme === 'dark' || value.theme === 'system'
       ? value.theme
       : DEFAULT_PREFS.theme;
+  const accent: AccentName = ACCENT_NAMES.includes(value.accent as AccentName)
+    ? (value.accent as AccentName)
+    : DEFAULT_PREFS.accent;
   const language: PrefsLanguage =
     value.language === 'bn' || value.language === 'mixed' || value.language === 'en'
       ? value.language
       : DEFAULT_PREFS.language;
   const depth = Number(value.defaultBridgeDepth);
+  const tab =
+    value.defaultCourseTab === 'topics' ||
+    value.defaultCourseTab === 'roadmap' ||
+    value.defaultCourseTab === 'lessons' ||
+    value.defaultCourseTab === 'tutor' ||
+    value.defaultCourseTab === 'practice' ||
+    value.defaultCourseTab === 'progress' ||
+    value.defaultCourseTab === 'material'
+      ? value.defaultCourseTab
+      : DEFAULT_PREFS.defaultCourseTab;
   return {
     theme,
+    accent,
+    glass: bool(value.glass, DEFAULT_PREFS.glass),
+    sharp: bool(value.sharp, DEFAULT_PREFS.sharp),
+    compact: bool(value.compact, DEFAULT_PREFS.compact),
+    reduceMotion: bool(value.reduceMotion, DEFAULT_PREFS.reduceMotion),
     displayName: typeof value.displayName === 'string' ? value.displayName : '',
     language,
     defaultBridgeDepth: Number.isFinite(depth) ? Math.min(4, Math.max(0, Math.round(depth))) : 2,
     defaultLessonDepth: value.defaultLessonDepth === 'bridge' ? 'bridge' : 'core',
-    reduceMotion: value.reduceMotion === true,
+    defaultCourseTab: tab,
+    showPercent: bool(value.showPercent, DEFAULT_PREFS.showPercent),
+    showCountdown: bool(value.showCountdown, DEFAULT_PREFS.showCountdown),
+    confirmDelete: bool(value.confirmDelete, DEFAULT_PREFS.confirmDelete),
+    showCitationPages: bool(value.showCitationPages, DEFAULT_PREFS.showCitationPages),
+    showSkippedInPlan: bool(value.showSkippedInPlan, DEFAULT_PREFS.showSkippedInPlan),
+    tutorGuideDefault: bool(value.tutorGuideDefault, DEFAULT_PREFS.tutorGuideDefault),
+    autoKnownOnStrongScore: bool(value.autoKnownOnStrongScore, DEFAULT_PREFS.autoKnownOnStrongScore),
+    jobToasts: bool(value.jobToasts, DEFAULT_PREFS.jobToasts),
+    autoRebuildRoadmap: bool(value.autoRebuildRoadmap, DEFAULT_PREFS.autoRebuildRoadmap),
+    autoEmbedPages: bool(value.autoEmbedPages, DEFAULT_PREFS.autoEmbedPages),
+    flagLowConfidence: bool(value.flagLowConfidence, DEFAULT_PREFS.flagLowConfidence),
   };
 }
 
@@ -75,7 +169,12 @@ export function applyPrefs(prefs: Prefs): void {
   const resolved = resolveTheme(prefs.theme);
   const root = document.documentElement;
   root.dataset.theme = resolved;
+  root.classList.toggle('dark', resolved === 'dark');
+  root.dataset.accent = prefs.accent;
   root.dataset.reduceMotion = String(prefs.reduceMotion);
+  root.dataset.glass = prefs.glass ? 'on' : 'off';
+  root.dataset.corners = prefs.sharp ? 'sharp' : 'round';
+  root.dataset.density = prefs.compact ? 'compact' : 'comfortable';
   root.style.colorScheme = resolved;
 }
 

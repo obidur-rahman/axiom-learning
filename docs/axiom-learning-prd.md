@@ -112,7 +112,7 @@ Priority: P0 means the prototype must have it. P1 means the prototype must have 
 | FR-011 | The app must let a Learner open, rename, and delete a Course. | P0 | Each action works. |
 | FR-020 | The app must accept PDF, JPG, and PNG files and pasted text. | P0 | Each type uploads and reaches the status Ready. |
 | FR-021 | The Learner must set the kind of each Material: syllabus, notes, past questions, suggestions, textbook, or other. | P0 | The kind shows on each Material. |
-| FR-022 | The app must enforce these proposed limits: 20 MB for each file, 10 files for each Course, 200 pages for each Course. | P0 | A file over the limit gets a clear message. |
+| FR-022 | In local mode, the app must not reject a Material file only because it is large. Files stay on the Learner's machine. If the reader cannot parse the file or runs out of memory, the app must show a clear error. | P0 | A large PDF is accepted, and a real read failure shows a clear message. |
 | FR-023 | The app must show the status of each Material: queued, reading, ready, or failed. | P0 | The status changes while the job runs. |
 | FR-024 | The app must delete a Material and all data made from it. | P0 | No Chunk of the Material remains. |
 | FR-025 | The app must keep page numbers. It must mark pages that it could not read well. | P1 | The Learner can see the marked pages. |

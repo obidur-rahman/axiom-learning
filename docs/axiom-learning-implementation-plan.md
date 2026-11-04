@@ -270,3 +270,29 @@ Do not remove P0 features.
 | OI-3 | Set the monthly model budget. | Builder | Before M1 |
 | OI-4 | Decide the visual style. | Builder | Before M3 |
 | OI-5 | Find a Bangla reader for the text check. | Builder | Before M6 |
+
+## 14. Desktop prototype status (2026-11-04)
+
+This section records the delta between the plan above and the shipped desktop
+build. The plan describes the web/Supabase delivery; the pivot plan replaced
+that delivery model and this is what exists now.
+
+Done:
+- Tauri 2 shell (window, dialog plugin, SQLite plugin, keyring commands).
+- Local SQLite schema and repositories (courses, materials, pages, topics,
+edges, weights, scope rules, roadmap versions/nodes, overrides, progress,
+lessons, reports, jobs, provider config, embeddings).
+- Deterministic roadmap engine, pipeline steps, in-process job worker.
+- PDF text layer, OCR, pasted text and vision read paths.
+- Material, topics/scope, roadmap (graph + list + history), lessons with check
+questions, tutor with citations, practice (MCQ + scored written answer),
+progress and JSON export.
+- Provider configuration (base URL, key in OS store, chat/embed models), local
+port auto-detect, capability probe, feature gating.
+- App shell, dashboard, searchable course library, settings/preferences with
+Light/Dark/System theme, local profile and study defaults.
+
+Not done (see PRODUCT.md): accounts and Supabase sync, premade roadmaps, share
+links, tutorial video, daily limits, bridge-node diagnostic flow, and the
+Bangla/English UI toggle (Bangla is supported in content and fonts, not in the
+interface chrome yet).

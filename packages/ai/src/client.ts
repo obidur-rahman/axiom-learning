@@ -1,4 +1,5 @@
 import type { ProviderConfig } from './config';
+import { getFetch } from './http';
 import type { ZodType } from 'zod';
 
 /** A chat message the caller composes. */
@@ -55,7 +56,7 @@ async function postJson(
   body: unknown,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const response = await fetch(`${normalizeBaseUrl(config.baseUrl)}${path}`, {
+  const response = await getFetch()(`${normalizeBaseUrl(config.baseUrl)}${path}`, {
     method: 'POST',
     headers: headers(config),
     body: JSON.stringify(body),

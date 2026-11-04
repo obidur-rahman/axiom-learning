@@ -37,6 +37,8 @@ export interface CourseDraft {
   level?: CourseLevel;
   language?: CourseLanguage;
   examDate?: string | null;
+  /** Preferred bridge depth for this course (0-4). Defaults to 2. */
+  bridgeDepth?: number;
 }
 
 export interface Material {

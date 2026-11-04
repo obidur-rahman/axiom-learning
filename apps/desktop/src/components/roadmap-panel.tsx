@@ -222,7 +222,7 @@ export function RoadmapPanel({ courseId }: { courseId: string }) {
 
   if (roadmap === null) {
     return (
-      <p className="rounded-[10px] border border-border bg-surface p-4 text-sm text-text-muted">
+      <p className="rounded-[var(--radius)] border border-border bg-surface p-4 text-sm text-text-muted">
         No roadmap yet. Check the Material tab and press Rebuild roadmap.
       </p>
     );
@@ -260,7 +260,7 @@ export function RoadmapPanel({ courseId }: { courseId: string }) {
                 await enqueue(db.driver, 'build_roadmap', { courseId });
               })();
             }}
-            className="rounded-[10px] border border-border bg-surface px-2 py-1 text-xs text-text"
+            className="rounded-[var(--radius)] border border-border bg-surface px-2 py-1 text-xs text-text"
           >
             {[0, 1, 2, 3, 4].map((value) => (
               <option key={value} value={value}>
@@ -271,7 +271,7 @@ export function RoadmapPanel({ courseId }: { courseId: string }) {
         </label>
       </div>
 
-      <div className="h-[420px] overflow-hidden rounded-[10px] border border-border bg-surface">
+      <div className="h-[420px] overflow-hidden rounded-[var(--radius)] border border-border bg-surface">
         {flow !== null && (
           <ReactFlow
             nodes={flow.nodes}
@@ -296,7 +296,7 @@ export function RoadmapPanel({ courseId }: { courseId: string }) {
           .map((node) => (
             <li
               key={node.id}
-              className="flex items-center justify-between gap-2 rounded-[10px] border border-border bg-surface px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-surface px-3 py-2"
             >
               <div className="min-w-0">
                 <p className="truncate text-sm">
@@ -312,21 +312,21 @@ export function RoadmapPanel({ courseId }: { courseId: string }) {
                 {node.type === 'skipped' ? (
                   <button
                     onClick={() => void mutate({ action: 'restore', topicId: node.id })}
-                    className="rounded-[10px] border border-known px-2 py-1 text-xs"
+                    className="rounded-[var(--radius)] border border-known px-2 py-1 text-xs"
                   >
                     Restore
                   </button>
                 ) : (
                   <button
                     onClick={() => void mutate({ action: 'mark_skip', topicId: node.id })}
-                    className="rounded-[10px] border border-border px-2 py-1 text-xs hover:border-warning"
+                    className="rounded-[var(--radius)] border border-border px-2 py-1 text-xs hover:border-warning"
                   >
                     Skip
                   </button>
                 )}
                 <button
                   onClick={() => setDetail({ node, depthLabel: node.type === 'core' ? 'core topic' : `bridge depth ${node.depth}` })}
-                  className="rounded-[10px] border border-border px-2 py-1 text-xs hover:border-accent"
+                  className="rounded-[var(--radius)] border border-border px-2 py-1 text-xs hover:border-accent"
                 >
                   Details
                 </button>
@@ -336,7 +336,7 @@ export function RoadmapPanel({ courseId }: { courseId: string }) {
       </ol>
 
       {detail !== null && (
-        <div className="flex flex-col gap-2 rounded-[10px] border border-border bg-surface p-3 text-sm">
+        <div className="flex flex-col gap-2 rounded-[var(--radius)] border border-border bg-surface p-3 text-sm">
           <div className="flex items-center justify-between">
             <p className="font-medium">{detail.node.title}</p>
             <button onClick={() => setDetail(null)} className="text-xs text-text-muted hover:text-text">

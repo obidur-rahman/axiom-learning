@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { capabilitySummary, autoDetect, loadForm, probeAndStore, saveForm, type ProviderForm } from '../lib/provider';
+import { isDesktopRuntime } from '../lib/db';
 
 interface Probe {
   loading: boolean;
@@ -10,18 +11,28 @@ interface Probe {
 }
 
 /**
- * Provider settings screen (task 8): the single entry where the local model
- * is configured. One primary action (Save + probe); auto-detect is a
- * secondary "Try local ports" button (FR-062).
+ * AI provider settings (task 8): the single entry where the model is
+ * configured. One primary action (Save and probe); "Try local ports" is the
+ * secondary auto-detect. The API key goes to the OS secure store, never to
+ * the database.
  */
 export function SettingsForm() {
   const [form, setForm] = useState<ProviderForm | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [saved, setSaved] = useState<string | null>(null);
   const [probe, setProbe] = useState<Probe>({ loading: false, summary: null, error: null });
   const [detecting, setDetecting] = useState(false);
 
   useEffect(() => {
-    void loadForm().then(setForm);
+    if (!isDesktopRuntime()) {
+      setLoadError('The AI provider settings are stored in the desktop app. Run npm run tauri dev.');
+      return;
+    }
+    void loadForm()
+      .then(setForm)
+      .catch((error: unknown) => {
+        setLoadError(error instanceof Error ? error.message : String(error));
+      });
   }, []);
 
   const update = useCallback((patch: Partial<ProviderForm>) => {
@@ -29,12 +40,13 @@ export function SettingsForm() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (form === null || form.baseUrl.trim() === '' || form.chatModel.trim() === '') {
+    if (form === null) return;
+    if (form.baseUrl.trim() === '' || form.chatModel.trim() === '') {
       setSaved('Base URL and chat model are required.');
       return;
     }
     await saveForm(form);
-    setSaved('Saved. Probing...');
+    setSaved('Saved. Probing capabilities...');
     setProbe({ loading: true, summary: null, error: null });
     try {
       const caps = await probeAndStore();
@@ -55,104 +67,131 @@ export function SettingsForm() {
     try {
       const found = await autoDetect();
       if (found === null) {
-        setSaved('No local model found on ports 11434/1234/8080.');
+        setSaved('No local model list answered on localhost ports 11434, 1234 or 8080. Check that the server is running and on one of those ports.');
       } else {
         update(found);
-        setSaved(`Detected ${found.baseUrl} - save to probe capabilities.`);
+        setSaved(
+          `Detected ${found.baseUrl}. Chat model: ${found.chatModel || 'none advertised'}. Save and probe to confirm it.`,
+        );
       }
     } finally {
       setDetecting(false);
     }
   }, [update]);
 
+  if (loadError !== '') {
+    return <p className="rounded-xl border border-border bg-surface p-4 text-sm text-text-muted">{loadError}</p>;
+  }
+
   if (form === null) {
-    return <p className="text-sm text-text-muted">Loading settings...</p>;
+    return (
+      <div className="flex flex-col gap-2" aria-live="polite">
+        <div className="skeleton h-9 w-full" />
+        <div className="skeleton h-9 w-full" />
+        <div className="skeleton h-9 w-2/3" />
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1 text-sm">
+      <fieldset>
+        <legend className="text-xs text-text-muted">Where the model runs</legend>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Provider mode">
+          {[
+            { value: 'local' as const, label: 'Local model', hint: 'Ollama, LM Studio, vLLM on this machine' },
+            { value: 'hosted' as const, label: 'Hosted API', hint: 'OpenRouter, OpenAI, or any compatible endpoint' },
+          ].map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={form.mode === option.value}
+              onClick={() => update({ mode: option.value })}
+              className={
+                form.mode === option.value
+                  ? 'rounded-2xl border border-accent bg-surface p-3 text-left'
+                  : 'rounded-2xl border border-border bg-panel-raised p-3 text-left transition-colors duration-200 hover:border-border-strong'
+              }
+            >
+              <span className="block text-sm font-medium">{option.label}</span>
+              <span className="mt-1 block text-[12px] text-text-muted">{option.hint}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <label className="field">
         Base URL
         <input
           value={form.baseUrl}
           onChange={(event) => update({ baseUrl: event.target.value })}
-          placeholder="http://localhost:11434"
-          className="rounded-[10px] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+          placeholder={form.mode === 'local' ? 'http://localhost:11434' : 'https://openrouter.ai/api'}
+          className="input"
         />
+        <span className="text-[12px] text-text-muted">
+          The OpenAI-compatible root; Axiom appends /chat/completions and /embeddings.
+        </span>
       </label>
 
-      <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1 text-sm">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="field">
           Chat model
           <input
             value={form.chatModel}
             onChange={(event) => update({ chatModel: event.target.value })}
             placeholder="qwen2.5:7b"
-            className="rounded-[10px] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+            className="input"
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm">
+        <label className="field">
           Embedding model (optional)
           <input
             value={form.embedModel}
             onChange={(event) => update({ embedModel: event.target.value })}
             placeholder="nomic-embed-text"
-            className="rounded-[10px] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+            className="input"
           />
         </label>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm">
-        API key (stored in the OS secure store)
+      <label className="field">
+        API key
         <input
           type="password"
           value={form.apiKey ?? ''}
           onChange={(event) => update({ apiKey: event.target.value })}
-          placeholder="Usually not needed for local models"
-          className="rounded-[10px] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+          placeholder={form.mode === 'local' ? 'Usually not needed for local models' : 'Paste the provider key'}
+          className="input"
         />
+        <span className="text-[12px] text-text-muted">
+          Stored in the OS secure store (Windows Credential Manager), never in the database.
+        </span>
       </label>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => void handleSave()}
-          className="rounded-[10px] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90"
-        >
-          Save and probe
+        <button type="button" onClick={() => void handleSave()} className="btn btn-primary" disabled={probe.loading}>
+          {probe.loading ? 'Probing...' : 'Save and probe'}
         </button>
-        <button
-          onClick={() => void handleDetect()}
-          disabled={detecting}
-          className="rounded-[10px] border border-border px-4 py-2 text-sm hover:border-accent disabled:opacity-50"
-        >
+        <button type="button" onClick={() => void handleDetect()} disabled={detecting} className="btn btn-ghost">
           {detecting ? 'Scanning ports...' : 'Try local ports'}
         </button>
-        <a href="/" className="text-xs tracking-wide text-text-muted uppercase no-underline hover:text-text">
-          Back to courses
-        </a>
       </div>
 
-      {saved !== null && <p className="text-sm text-text-muted">{saved}</p>}
+      {saved !== null && <p className="text-sm text-text-muted" aria-live="polite">{saved}</p>}
       {probe.error !== null && (
-        <p className="rounded-[10px] border border-danger/40 bg-surface px-3 py-2 text-sm text-danger">
-          {probe.error}
-        </p>
+        <p className="rounded-xl border border-danger/40 bg-surface px-3 py-2 text-sm text-danger">{probe.error}</p>
       )}
       {probe.summary !== null && (
-        <ul className="flex flex-col gap-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-sm">
+        <ul className="flex flex-col gap-1.5 rounded-xl border border-border bg-surface px-3 py-3 text-sm">
           {probe.summary.map((line) => (
             <li key={line} className="flex items-center gap-2">
-              <span aria-hidden className="size-1.5 rounded-full bg-accent" />
+              <span aria-hidden className="size-1.5 rounded-full bg-known" />
               {line}
             </li>
           ))}
         </ul>
       )}
-
-      <p className="text-xs text-text-muted">
-        Needs an OpenAI-compatible endpoint. The API key is stored in the OS secure store and is
-        sent only to your provider.
-      </p>
     </div>
   );
 }

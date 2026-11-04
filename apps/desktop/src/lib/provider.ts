@@ -7,10 +7,12 @@ import {
   LOCAL_PORTS,
   detectLocalProvider,
   normalizeBaseUrl,
+  pickLocalModels,
   probeCapabilities,
   type Capabilities,
   type ProviderConfig,
 } from '@axiom/ai';
+import { installProviderFetch } from './provider-http';
 import {
   DEFAULT_CAPABILITIES,
   capabilitiesToStored,
@@ -77,6 +79,7 @@ export async function loadConfig(): Promise<ProviderConfig | null> {
 let capabilityCache: StoredCapabilities | null = null;
 
 export async function probeAndStore(): Promise<StoredCapabilities> {
+  await installProviderFetch();
   const config = await loadConfig();
   if (config === null) {
     capabilityCache = { ...DEFAULT_CAPABILITIES };
@@ -93,12 +96,14 @@ export function currentCapabilities(): StoredCapabilities {
 
 /** Auto-detect (FR-062): try the known local ports, offer the first that answers. */
 export async function autoDetect(): Promise<ProviderForm | null> {
-  const baseUrl = await detectLocalProvider({ ports: LOCAL_PORTS });
-  if (baseUrl === null) return null;
+  await installProviderFetch();
+  const detected = await detectLocalProvider({ ports: LOCAL_PORTS });
+  if (detected === null) return null;
+  const { chatModel, embedModel } = pickLocalModels(detected.models);
   return {
-    baseUrl,
-    chatModel: DEFAULT_CHAT_MODEL,
-    embedModel: DEFAULT_EMBED_MODEL,
+    baseUrl: detected.baseUrl,
+    chatModel,
+    embedModel,
     mode: 'local',
   };
 }

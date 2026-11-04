@@ -24,7 +24,7 @@ export async function getSecret(account: string): Promise<string | null> {
     return localStorage.getItem(`keyring:${KEYRING_SERVICE}:${account}`);
   }
   try {
-    const value = await invoke('get_secret', { service: KEYRING_SERVICE, account });
+    const value = await invoke('get_secret', { account });
     return typeof value === 'string' && value.length > 0 ? value : null;
   } catch {
     return null; // entry not found
@@ -38,11 +38,11 @@ export async function setSecret(account: string, secret: string): Promise<void> 
     return;
   }
   try {
-    await invoke('delete_secret', { service: KEYRING_SERVICE, account });
+    await invoke('delete_secret', { account });
   } catch {
     // first save: nothing to delete
   }
-  await invoke('set_secret', { service: KEYRING_SERVICE, account, password: secret });
+  await invoke('set_secret', { account, password: secret });
 }
 
 export async function deleteSecret(account: string): Promise<void> {
@@ -52,7 +52,7 @@ export async function deleteSecret(account: string): Promise<void> {
     return;
   }
   try {
-    await invoke('delete_secret', { service: KEYRING_SERVICE, account });
+    await invoke('delete_secret', { account });
   } catch {
     // already gone
   }

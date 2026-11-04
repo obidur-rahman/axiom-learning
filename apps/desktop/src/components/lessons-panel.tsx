@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   enqueue,
   flagLesson,
@@ -8,8 +8,13 @@ import {
   type DbDriver,
   type Lesson,
 } from '@axiom/data';
+import { BookOpen, Layers, RefreshCw } from 'lucide-react';
 import { getDb } from '../lib/db';
 import { onAppEvent } from '../lib/events';
+import { parseLessonContent } from '../lib/lesson-content';
+import { loadPrefs, usePrefs } from '../lib/prefs';
+import { LessonDeck } from './lesson-deck';
+import { Markdown } from './markdown';
 
 /** One topic option in the lesson picker. */
 interface TopicOption {
@@ -39,11 +44,12 @@ function listTopics(db: DbDriver, courseId: string): Promise<TopicOption[]> {
 }
 
 /**
- * Lessons + diagnostic (FR-040..FR-057): one topic at a time, lesson text
- * with page citations, three check questions as the self-diagnostic, and a
- * "this is wrong" flag rule for general-content lessons.
+ * Lessons + diagnostic (FR-040..FR-057): one topic at a time. A saved lesson
+ * becomes a designed slide deck with a key-idea footer, a final check-yourself
+ * slide and a read-all fallback.
  */
 export function LessonsPanel({ courseId }: { courseId: string }) {
+  const prefs = usePrefs();
   const [topics, setTopics] = useState<TopicOption[]>([]);
   const [topicId, setTopicId] = useState('');
   const [depth, setDepth] = useState<'core' | 'bridge'>('core');
@@ -52,6 +58,7 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
   const [shown, setShown] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [view, setView] = useState<'slides' | 'read'>('slides');
 
   const loadLesson = useCallback(async (target: string, forDepth: string) => {
     if (target === '') return;
@@ -61,14 +68,23 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
 
   useEffect(() => {
     void (async () => {
+      // Read the saved default on the client: the static HTML has no storage.
+      const initialDepth = loadPrefs().defaultLessonDepth;
+      setDepth(initialDepth);
       const db = await getDb();
       const options = await listTopics(db.driver, courseId);
       setTopics(options);
       const first = options[0]?.id ?? '';
       setTopicId(first);
-      await loadLesson(first, 'core');
+      await loadLesson(first, initialDepth);
     })();
   }, [courseId, loadLesson]);
+
+  useEffect(() => {
+    setView('slides');
+    setAnswers(['', '', '']);
+    setShown([]);
+  }, [lesson?.id]);
 
   useEffect(
     () =>
@@ -76,8 +92,14 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
         if (event.kind === 'lesson-ready' && event.courseId === courseId && event.topicId === topicId) {
           void loadLesson(topicId, depth);
         }
-        if (event.kind === 'job-updated' && event.jobKind === 'build_lesson' && event.status === 'queued') {
-          setMessage(`Lesson failed: ${event.error ?? 'unknown error'}`);
+        if (event.kind === 'job-updated' && event.jobKind === 'build_lesson') {
+          if (event.status === 'failed') {
+            setMessage(`Lesson failed: ${event.error ?? 'unknown error'}`);
+          } else if (event.status === 'done') {
+            setMessage('');
+          } else if (event.status === 'running') {
+            setMessage('Building the lesson...');
+          }
           setBusy(false);
         }
       }),
@@ -104,122 +126,174 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
     setMessage('Lesson flagged and hidden. Generate a new one.');
   }, [lesson]);
 
-  const questions = lesson === null ? [] : parseQuestions(lesson.contentMd);
+  const parsed = useMemo(
+    () => (lesson === null ? null : parseLessonContent(lesson.contentMd)),
+    [lesson],
+  );
+  const slides = parsed?.slides ?? [];
+  const questions = parsed?.checkQuestions ?? [];
+  const activeTopic = topics.find((topic) => topic.id === topicId);
+  const citationPages = useMemo(() => {
+    if (lesson?.citations === null || lesson?.citations === undefined) return [];
+    return (lesson.citations as { page?: number }[])
+      .map((citation) => citation.page)
+      .filter((page): page is number => typeof page === 'number');
+  }, [lesson]);
+
+  const setAnswer = useCallback((index: number, value: string) => {
+    setAnswers((current) => current.map((answer, answerIndex) => (answerIndex === index ? value : answer)));
+  }, []);
+
+  const showAnswer = useCallback((index: number) => {
+    setShown((current) => (current.includes(index) ? current : [...current, index]));
+  }, []);
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={topicId}
-          onChange={(event) => {
-            setTopicId(event.target.value);
-            void loadLesson(event.target.value, depth);
-          }}
-          className="flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-sm"
-        >
-          {topics.length === 0 && <option value="">No topics yet</option>}
-          {topics.map((topic) => (
-            <option key={topic.id} value={topic.id}>
-              {topic.title}
-            </option>
-          ))}
-        </select>
-        <select
-          value={depth}
-          onChange={(event) => {
-            const next = event.target.value as 'core' | 'bridge';
-            setDepth(next);
-            void loadLesson(topicId, next);
-          }}
-          title="Lesson depth"
-          className="rounded-[10px] border border-border bg-surface px-3 py-2 text-sm"
-        >
-          <option value="core">Full depth</option>
-          <option value="bridge">Quick recap</option>
-        </select>
+      <div className="flex flex-col gap-2.5 rounded-[var(--radius)] border border-border bg-surface p-2.5 lg:flex-row lg:items-end">
+        <label className="field min-w-0 flex-1">
+          <span className="text-[11.5px] font-medium">Topic</span>
+          <select
+            value={topicId}
+            onChange={(event) => {
+              setTopicId(event.target.value);
+              void loadLesson(event.target.value, depth);
+            }}
+            className="input"
+          >
+            {topics.length === 0 && <option value="">No topics yet</option>}
+            {topics.map((topic) => (
+              <option key={topic.id} value={topic.id}>
+                {topic.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field lg:w-[170px]">
+          <span className="text-[11.5px] font-medium">Depth</span>
+          <select
+            value={depth}
+            onChange={(event) => {
+              const next = event.target.value as 'core' | 'bridge';
+              setDepth(next);
+              void loadLesson(topicId, next);
+            }}
+            className="input"
+          >
+            <option value="core">Full lesson</option>
+            <option value="bridge">Quick recap</option>
+          </select>
+        </label>
         <button
+          type="button"
           onClick={() => void generate()}
           disabled={topicId === '' || busy}
-          className="rounded-[10px] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90 disabled:opacity-50"
+          className="btn btn-primary lg:mb-px"
         >
+          <RefreshCw className={`size-4 ${busy ? 'animate-spin' : ''}`} aria-hidden />
           {busy ? 'Building...' : lesson === null ? 'Generate lesson' : 'Regenerate'}
         </button>
       </div>
 
-      {message !== '' && <p className="text-sm text-text-muted" aria-live="polite">{message}</p>}
+      {message !== '' && (
+        <p className="text-[13px] text-text-muted" aria-live="polite">
+          {message}
+        </p>
+      )}
 
-      {lesson !== null && (
-        <div className="flex flex-col gap-4">
+      {lesson !== null && parsed !== null && (
+        <div className="flex flex-col gap-3.5">
           {lesson.isGeneralContent && (
-            <p className="rounded-[10px] border border-warning/40 bg-surface px-3 py-2 text-sm text-warning">
+            <p className="rounded-[var(--radius)] border border-warning/40 bg-surface px-3.5 py-2.5 text-[13px] text-warning">
               This lesson uses general knowledge - not grounded in your uploaded material.
             </p>
           )}
-          <article className="rounded-[10px] border border-border bg-surface p-4 text-sm leading-relaxed whitespace-pre-wrap">
-            {lesson.contentMd}
-          </article>
-          {lesson.citations !== null && lesson.citations.length > 0 && (
-            <p className="text-xs text-text-muted">
-              Sources: pages {(lesson.citations as { page?: number }[]).map((cit) => cit.page).join(', ')}
-            </p>
+
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-[20px] font-semibold tracking-[-0.02em]">
+                {activeTopic?.title ?? parsed.title}
+              </h2>
+              <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <span className="chip">{depth === 'core' ? 'Full lesson' : 'Quick recap'}</span>
+                <span className="chip">{slides.length} slides</span>
+                {questions.length > 0 && <span className="chip">{questions.length} check questions</span>}
+              </p>
+            </div>
+
+            <div
+              className="flex items-center gap-1 rounded-[var(--radius)] border border-border bg-surface p-1"
+              role="group"
+              aria-label="Lesson view"
+            >
+              <button
+                type="button"
+                aria-pressed={view === 'slides'}
+                onClick={() => setView('slides')}
+                className={`inline-flex items-center gap-1.5 rounded-[calc(var(--radius)-2px)] px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
+                  view === 'slides' ? 'bg-accent text-accent-contrast' : 'text-text-muted hover:text-text'
+                }`}
+              >
+                <Layers className="size-3.5" aria-hidden />
+                Slides
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === 'read'}
+                onClick={() => setView('read')}
+                className={`inline-flex items-center gap-1.5 rounded-[calc(var(--radius)-2px)] px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
+                  view === 'read' ? 'bg-accent text-accent-contrast' : 'text-text-muted hover:text-text'
+                }`}
+              >
+                <BookOpen className="size-3.5" aria-hidden />
+                Read all
+              </button>
+            </div>
+          </div>
+
+          {view === 'slides' ? (
+            <LessonDeck
+              key={lesson.id}
+              title={activeTopic?.title ?? parsed.title}
+              slides={slides}
+              questions={questions}
+              answers={answers}
+              onAnswer={setAnswer}
+              shown={shown}
+              onShowAnswer={showAnswer}
+            />
+          ) : (
+            <article className="rounded-[var(--radius-card)] border border-border bg-panel p-5 sm:p-6">
+              <Markdown content={parsed.readMarkdown} />
+            </article>
           )}
 
-          <section className="flex flex-col gap-2" aria-label="Self-diagnostic">
-            <p className="text-sm font-medium">Check yourself (3 questions)</p>
-            {questions.map((question, index) => (
-              <div key={index} className="rounded-[10px] border border-border bg-surface p-3">
-                <p className="text-sm">{question.prompt}</p>
-                <textarea
-                  rows={2}
-                  value={answers[index] ?? ''}
-                  onChange={(event) =>
-                    setAnswers((current) => current.map((value, i) => (i === index ? event.target.value : value)))
-                  }
-                  placeholder="Your answer..."
-                  className="mt-2 w-full rounded-[10px] border border-border bg-bg px-2 py-1 text-sm outline-none focus:border-accent"
-                />
-                {shown.includes(index) && (
-                  <p className="mt-2 rounded-[10px] bg-surface px-2 py-1 text-sm text-text-muted">
-                    Answer: {question.answer}
-                  </p>
-                )}
-                <button
-                  onClick={() => setShown((current) => (current.includes(index) ? current : [...current, index]))}
-                  className="mt-2 text-xs text-accent underline-offset-4 hover:underline"
-                >
-                  Show answer
-                </button>
-              </div>
-            ))}
-            <p className="text-xs text-text-muted">
-              Mark a topic "known" in Progress when you can answer all three without looking.
-            </p>
-          </section>
+          {prefs.showCitationPages && citationPages.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11.5px] text-text-muted">Sources</span>
+              {citationPages.map((page) => (
+                <span key={page} className="chip num">
+                  p.{page}
+                </span>
+              ))}
+            </div>
+          )}
 
-          <button
-            onClick={() => void flag()}
-            className="self-start rounded-[10px] border border-border px-3 py-1.5 text-xs hover:border-danger hover:text-danger"
-          >
-            This lesson is wrong (flag it)
+          <button onClick={() => void flag()} className="btn btn-danger btn-sm self-start">
+            This lesson is wrong - flag it
           </button>
         </div>
       )}
 
       {lesson === null && topics.length > 0 && message === '' && (
-        <p className="rounded-[10px] border border-border bg-surface p-4 text-sm text-text-muted">
-          No lesson for this topic yet. Press Generate; the first build takes a few seconds.
-        </p>
+        <div className="rounded-[var(--radius)] border border-dashed border-border-strong bg-surface p-5">
+          <p className="text-[14px] font-medium">No lesson for this topic yet</p>
+          <p className="mt-1 max-w-[60ch] text-[13px] leading-relaxed text-text-muted">
+            Press Generate. Axiom builds a short, cited slide deck from your material, plus three questions to test
+            yourself.
+          </p>
+        </div>
       )}
     </div>
   );
-}
-
-/** Reads the `## Check yourself` block: `1. question (Answer: answer)`. */
-function parseQuestions(contentMd: string): { prompt: string; answer: string }[] {
-  const found: { prompt: string; answer: string }[] = [];
-  for (const line of contentMd.split('\n')) {
-    const match = /^\d+\.\s*(.+?)\s*\(Answer: (.*?)\)\s*$/.exec(line);
-    if (match !== null) found.push({ prompt: match[1] ?? '', answer: match[2] ?? '' });
-  }
-  return found.slice(0, 3);
 }

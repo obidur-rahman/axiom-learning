@@ -4,16 +4,17 @@ use keyring::Entry;
 const SERVICE: &str = "axiom-learning";
 
 /// Store a secret (e.g. an API key) in the OS secure store.
+/// `account` matches the account name used by the frontend (`default` today).
 #[tauri::command]
-fn set_secret(key: String, value: String) -> Result<(), String> {
-    let entry = Entry::new(SERVICE, &key).map_err(|e| e.to_string())?;
-    entry.set_password(&value).map_err(|e| e.to_string())
+fn set_secret(account: String, password: String) -> Result<(), String> {
+    let entry = Entry::new(SERVICE, &account).map_err(|e| e.to_string())?;
+    entry.set_password(&password).map_err(|e| e.to_string())
 }
 
 /// Read a secret. A missing secret returns None (not an error).
 #[tauri::command]
-fn get_secret(key: String) -> Result<Option<String>, String> {
-    let entry = Entry::new(SERVICE, &key).map_err(|e| e.to_string())?;
+fn get_secret(account: String) -> Result<Option<String>, String> {
+    let entry = Entry::new(SERVICE, &account).map_err(|e| e.to_string())?;
     match entry.get_password() {
         Ok(value) => Ok(Some(value)),
         Err(keyring::Error::NoEntry) => Ok(None),
@@ -23,8 +24,8 @@ fn get_secret(key: String) -> Result<Option<String>, String> {
 
 /// Delete a secret.
 #[tauri::command]
-fn delete_secret(key: String) -> Result<(), String> {
-    let entry = Entry::new(SERVICE, &key).map_err(|e| e.to_string())?;
+fn delete_secret(account: String) -> Result<(), String> {
+    let entry = Entry::new(SERVICE, &account).map_err(|e| e.to_string())?;
     match entry.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
@@ -35,6 +36,9 @@ fn delete_secret(key: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Provider HTTP from Rust: local model servers often omit CORS headers,
+        // which would block a webview fetch even when the server is healthy.
+        .plugin(tauri_plugin_http::init())
         // Local SQLite. Connection strings and migrations are handled in
         // TypeScript (packages/data keeps all logic, per the pivot plan).
         .plugin(tauri_plugin_sql::Builder::new().build())

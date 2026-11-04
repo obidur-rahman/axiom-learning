@@ -109,7 +109,9 @@ The designer sets the values. Each text and background pair must meet the WCAG 2
 ### 8.2 Lesson page
 
 - Show the title, the type of the Node, and the reading time.
-- Show the text in short sections.
+- Show the text as short, navigable slides. Each slide teaches one idea.
+- Render Markdown and KaTeX formulas. Keep a Read all fallback.
+- Move through slides with the arrow keys and show the slide number.
 - Show Citations as small tags. A tap opens the source text.
 - Show the check questions at the end.
 - Show the buttons Ask the Tutor, Practice, and Mark as done.

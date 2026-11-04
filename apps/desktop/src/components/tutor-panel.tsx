@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamTutorAnswer, type TutorMessage } from '@axiom/pipeline';
 import { getDb } from '../lib/db';
 import { loadConfig } from '../lib/provider';
+import { loadPrefs, usePrefs } from '../lib/prefs';
+import { Markdown } from './markdown';
 
 /**
  * Tutor chat (FR-058..FR-060): grounded streaming answers with page
@@ -12,6 +14,7 @@ import { loadConfig } from '../lib/provider';
  * provider; the lesson stays inside one thread per topic.
  */
 export function TutorPanel({ courseId }: { courseId: string }) {
+  const prefs = usePrefs();
   const [messages, setMessages] = useState<TutorMessage[]>([]);
   const [input, setInput] = useState('');
   const [guideMode, setGuideMode] = useState(false);
@@ -19,14 +22,14 @@ export function TutorPanel({ courseId }: { courseId: string }) {
   const [streamText, setStreamText] = useState('');
   const [failureCount, setFailureCount] = useState(0);
   const [error, setError] = useState('');
-  const seeded = useRef(false);
   const thread = useRef<TutorMessage[]>([]);
 
   useEffect(() => {
     setMessages([]);
     setStreamText('');
     setFailureCount(0);
-    seeded.current = true;
+    setGuideMode(loadPrefs().tutorGuideDefault);
+    thread.current = [];
   }, [courseId]);
 
   const send = useCallback(async () => {
@@ -42,7 +45,9 @@ export function TutorPanel({ courseId }: { courseId: string }) {
       setStreaming(false);
       return;
     }
-    let gotDelta = false;
+    // Accumulate locally: React state may lag the final stream chunk by one
+    // render, which would truncate the saved answer.
+    let accumulated = '';
     await streamTutorAnswer(
       config,
       courseId,
@@ -52,15 +57,14 @@ export function TutorPanel({ courseId }: { courseId: string }) {
       guideMode,
       {
         onDelta: (chunk) => {
-          gotDelta = true;
-          setStreamText((current) => current + chunk);
+          accumulated += chunk;
+          setStreamText(accumulated);
         },
         onDone: (citations) => {
-          const finalText = streamTextRef.current;
           thread.current = [
             ...thread.current,
             { role: 'user', content: question, citations: [] } as TutorMessage,
-            { role: 'assistant', content: finalText, citations } as TutorMessage,
+            { role: 'assistant', content: accumulated, citations } as TutorMessage,
           ];
           setMessages([...thread.current]);
           setStreamText('');
@@ -75,12 +79,6 @@ export function TutorPanel({ courseId }: { courseId: string }) {
     );
   }, [input, streaming, courseId, guideMode]);
 
-  // The onDone callback needs the accumulated text; keep a ref in sync.
-  const streamTextRef = useRef('');
-  useEffect(() => {
-    streamTextRef.current = streamText;
-  }, [streamText]);
-
   return (
     <div className="flex flex-col gap-3">
       <label className="flex items-center gap-2 text-sm text-text-muted">
@@ -93,7 +91,7 @@ export function TutorPanel({ courseId }: { courseId: string }) {
         Guide me first (ask guiding questions back)
       </label>
 
-      <div className="flex max-h-[420px] min-h-[160px] flex-col gap-2 overflow-y-auto rounded-[10px] border border-border bg-surface p-3">
+      <div className="flex max-h-[420px] min-h-[160px] flex-col gap-2 overflow-y-auto rounded-[var(--radius)] border border-border bg-surface p-3">
         {messages.length === 0 && streamText === '' && (
           <p className="text-sm text-text-muted">
             Ask anything from this course. Answers only use your material pages
@@ -106,12 +104,12 @@ export function TutorPanel({ courseId }: { courseId: string }) {
             key={index}
             className={
               message.role === 'user'
-                ? 'self-end max-w-[80%] rounded-[10px] bg-accent/20 px-3 py-2 text-sm'
-                : 'max-w-[85%] rounded-[10px] border border-border bg-bg px-3 py-2 text-sm'
+                ? 'self-end max-w-[80%] rounded-[var(--radius)] bg-accent/20 px-3 py-2 text-sm'
+                : 'max-w-[85%] rounded-[var(--radius)] border border-border bg-bg px-3 py-2 text-sm'
             }
           >
-            <p className="whitespace-pre-wrap">{message.content}</p>
-            {message.citations.length > 0 && (
+            <Markdown content={message.content} compact />
+            {prefs.showCitationPages && message.citations.length > 0 && (
               <p className="mt-1 text-xs text-text-muted">
                 Sources: {message.citations.map((page) => `p.${page}`).join(', ')}
               </p>
@@ -119,19 +117,23 @@ export function TutorPanel({ courseId }: { courseId: string }) {
           </div>
         ))}
         {streaming && (
-          <div className="max-w-[85%] rounded-[10px] border border-border bg-bg px-3 py-2 text-sm">
-            <p className="whitespace-pre-wrap">
-              {streamText === '' ? 'Thinking...' : streamText}
-              <span aria-hidden className="animate-pulse">
-                |
-              </span>
-            </p>
+          <div className="max-w-[85%] rounded-[var(--radius)] border border-border bg-bg px-3 py-2 text-sm">
+            {streamText === '' ? (
+              <p>Thinking...</p>
+            ) : (
+              <>
+                <Markdown content={streamText} compact />
+                <span aria-hidden className="animate-pulse">
+                  |
+                </span>
+              </>
+            )}
           </div>
         )}
       </div>
 
       {error !== '' && (
-        <p className="rounded-[10px] border border-danger/40 bg-surface px-3 py-2 text-sm text-danger">
+        <p className="rounded-[var(--radius)] border border-danger/40 bg-surface px-3 py-2 text-sm text-danger">
           {error}
           {failureCount >= 3 && (
             <>
@@ -154,12 +156,12 @@ export function TutorPanel({ courseId }: { courseId: string }) {
             if (event.key === 'Enter') void send();
           }}
           placeholder="Ask about a topic..."
-          className="flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+          className="flex-1 rounded-[var(--radius)] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
         />
         <button
           onClick={() => void send()}
           disabled={input.trim() === '' || streaming}
-          className="rounded-[10px] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90 disabled:opacity-40"
+          className="rounded-[var(--radius)] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90 disabled:opacity-40"
         >
           Send
         </button>

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { detectLocalProvider, probeCapabilities } from '../src';
+import {
+  detectLocalProvider,
+  pickLocalModels,
+  probeCapabilities,
+  setFetchImplementation,
+} from '../src';
 import type { ProviderConfig } from '../src';
 
 function jsonResponse(body: unknown, status = 200) {
@@ -20,6 +25,7 @@ const config: ProviderConfig = {
 };
 
 afterEach(() => {
+  setFetchImplementation(null);
   vi.unstubAllGlobals();
 });
 
@@ -63,6 +69,15 @@ describe('probeCapabilities', () => {
     const caps = await probeCapabilities(config);
     expect(caps.embeddings).toBe(false);
   });
+
+  it('uses the installed fetch implementation', async () => {
+    const installed = vi.fn(async () => jsonResponse(chatBody('{"ok":true}')));
+    setFetchImplementation(installed);
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'wrong transport' }, 500)));
+    const caps = await probeCapabilities(config);
+    expect(caps.chat).toBe(true);
+    expect(installed).toHaveBeenCalled();
+  });
 });
 
 describe('detectLocalProvider', () => {
@@ -76,8 +91,8 @@ describe('detectLocalProvider', () => {
         return jsonResponse({ error: 'closed' }, 500);
       }),
     );
-    const baseUrl = await detectLocalProvider();
-    expect(baseUrl).toBe('http://localhost:11434');
+    const found = await detectLocalProvider();
+    expect(found).toEqual({ baseUrl: 'http://localhost:11434', models: ['llama3'] });
   });
 
   it('returns null when no common port answers', async () => {
@@ -99,8 +114,54 @@ describe('detectLocalProvider', () => {
         return jsonResponse({ error: 'closed' }, 500);
       }),
     );
-    expect(await detectLocalProvider({ ports: [11434, 1234, 8080] })).toBe(
-      'http://localhost:1234',
+    expect(await detectLocalProvider({ ports: [11434, 1234, 8080] })).toEqual({
+      baseUrl: 'http://localhost:1234',
+      models: ['x'],
+    });
+  });
+
+  it('returns every model id the server advertises', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          data: [
+            { id: 'prism-ml/bonsai-27b' },
+            { id: 'text-embedding-nomic-embed-text-v1.5' },
+            { object: 'model' },
+          ],
+        }),
+      ),
     );
+    expect(await detectLocalProvider({ ports: [1234] })).toEqual({
+      baseUrl: 'http://localhost:1234',
+      models: ['prism-ml/bonsai-27b', 'text-embedding-nomic-embed-text-v1.5'],
+    });
+  });
+});
+
+describe('pickLocalModels', () => {
+  it('uses the advertised chat and embedding ids instead of Ollama defaults', () => {
+    expect(
+      pickLocalModels([
+        'prism-ml/bonsai-27b',
+        'google/gemma-4-12b-qat',
+        'text-embedding-nomic-embed-text-v1.5',
+      ]),
+    ).toEqual({
+      chatModel: 'prism-ml/bonsai-27b',
+      embedModel: 'text-embedding-nomic-embed-text-v1.5',
+    });
+  });
+
+  it('prefers a chat or instruct model when the list has one', () => {
+    expect(pickLocalModels(['reasoner', 'qwen2.5-instruct', 'bge-embed'])).toEqual({
+      chatModel: 'qwen2.5-instruct',
+      embedModel: 'bge-embed',
+    });
+  });
+
+  it('leaves the embedding model empty when none is advertised', () => {
+    expect(pickLocalModels(['llama3'])).toEqual({ chatModel: 'llama3', embedModel: '' });
   });
 });

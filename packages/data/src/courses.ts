@@ -32,7 +32,10 @@ export async function createCourse(
     examDate: draft.examDate ?? null,
     isPremade: false,
     clonedFrom: null,
-    bridgeDepth: 2,
+    bridgeDepth:
+      draft.bridgeDepth === undefined
+        ? 2
+        : Math.min(4, Math.max(0, Math.round(draft.bridgeDepth))),
     status: 'draft',
     createdAt: new Date().toISOString(),
   };

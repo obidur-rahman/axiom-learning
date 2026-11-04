@@ -10,24 +10,30 @@ import { LessonsPanel } from './lessons-panel';
 import { TutorPanel } from './tutor-panel';
 import { PracticePanel } from './practice-panel';
 import { ProgressPanel } from './progress-panel';
-import { getDb, isDesktopRuntime } from '../lib/db';
-import { startWorker, stopWorker } from '../lib/worker';
+import { getDb } from '../lib/db';
+import { loadPrefs, type CourseTab } from '../lib/prefs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
-type TabKind = 'material' | 'topics' | 'roadmap' | 'lessons' | 'tutor' | 'practice' | 'progress';
-
-const TABS: { kind: TabKind; label: string }[] = [
-  { kind: 'material', label: 'Material' },
-  { kind: 'topics', label: 'Topics & scope' },
-  { kind: 'roadmap', label: 'Roadmap' },
-  { kind: 'lessons', label: 'Lessons' },
-  { kind: 'tutor', label: 'Tutor' },
-  { kind: 'practice', label: 'Practice' },
-  { kind: 'progress', label: 'Progress' },
+const TABS: { kind: CourseTab; label: string; hint: string }[] = [
+  { kind: 'material', label: 'Material', hint: 'Upload and read the syllabus, notes and past papers' },
+  { kind: 'topics', label: 'Topics & scope', hint: 'Edit topics and what the exam covers' },
+  { kind: 'roadmap', label: 'Roadmap', hint: 'The pruned dependency graph and study order' },
+  { kind: 'lessons', label: 'Lessons', hint: 'Read a lesson with citations and check questions' },
+  { kind: 'tutor', label: 'Tutor', hint: 'Ask questions grounded in your material' },
+  { kind: 'practice', label: 'Practice', hint: 'Multiple choice and a scored written answer' },
+  { kind: 'progress', label: 'Progress', hint: 'Study plan, status and exam date' },
 ];
 
 export function CourseScreen() {
   return (
-    <Suspense fallback={<p className="p-6 text-sm text-text-muted">Loading course...</p>}>
+    <Suspense
+      fallback={
+        <div className="card p-8" aria-live="polite">
+          <div className="skeleton h-6 w-56" />
+          <div className="skeleton mt-3 h-3 w-32" />
+        </div>
+      }
+    >
       <CourseTabs />
     </Suspense>
   );
@@ -38,10 +44,17 @@ function CourseTabs() {
   const courseId = params.get('id') ?? '';
   const [course, setCourse] = useState<Course | null>(null);
   const [missing, setMissing] = useState(false);
-  const [tab, setTab] = useState<TabKind>(() => {
+  const [tab, setTab] = useState<CourseTab>(() => {
     const requested = params.get('tab');
-    return TABS.some((entry) => entry.kind === requested) ? (requested as TabKind) : 'material';
+    return TABS.some((entry) => entry.kind === requested) ? (requested as CourseTab) : 'material';
   });
+
+  // No ?tab in the link: land on the tab chosen in Settings.
+  useEffect(() => {
+    if (params.get('tab') !== null) return;
+    const preferred = loadPrefs().defaultCourseTab;
+    if (TABS.some((entry) => entry.kind === preferred)) setTab(preferred);
+  }, [params]);
 
   const load = useCallback(async () => {
     if (courseId === '') {
@@ -58,62 +71,83 @@ function CourseTabs() {
     void load();
   }, [load]);
 
-  // One worker instance serves the whole webview.
-  useEffect(() => {
-    if (!isDesktopRuntime()) return;
-    startWorker();
-    return () => stopWorker();
-  }, []);
-
   if (missing) {
     return (
-      <main className="panel mx-auto w-full max-w-2xl p-8">
+      <div className="card mx-auto w-full max-w-2xl p-8">
         <p className="text-sm text-text-muted">Course not found.</p>
-        <a href="/" className="mt-3 inline-block text-xs tracking-wide text-text-muted uppercase no-underline hover:text-text">
+        <a href="/courses" className="btn btn-ghost btn-sm mt-3">
           Back to courses
         </a>
-      </main>
+      </div>
     );
   }
   if (course === null) {
     return (
-      <main className="panel mx-auto w-full max-w-3xl p-10 text-sm text-text-muted">Loading course...</main>
+      <div className="card w-full p-8" aria-live="polite">
+        <div className="skeleton h-6 w-56" />
+        <div className="skeleton mt-3 h-3 w-32" />
+      </div>
     );
   }
 
+  const active = TABS.find((entry) => entry.kind === tab) ?? TABS[0]!;
+
   return (
-    <main className="panel mx-auto w-full max-w-3xl p-6 md:p-10">
-      <a href="/" className="text-xs tracking-wide text-text-muted uppercase no-underline hover:text-text">
-        &larr; Courses
-      </a>
-      <h1 className="mt-3 text-[32px] font-semibold leading-tight tracking-tight">{course.title}</h1>
-
-      <nav className="mt-5 flex flex-wrap gap-x-6 gap-y-2 border-b border-border pb-2" aria-label="Course sections">
-        {TABS.map((entry) => (
-          <button
-            key={entry.kind}
-            onClick={() => setTab(entry.kind)}
-            aria-current={tab === entry.kind ? 'page' : undefined}
-            className={
-              tab === entry.kind
-                ? 'border-b-2 border-text pb-2 -mb-2.5 text-sm font-medium text-text'
-                : '-mb-2.5 border-b-2 border-transparent pb-2 text-sm text-text-muted transition-colors duration-200 hover:text-text'
-            }
-          >
-            {entry.label}
-          </button>
-        ))}
-      </nav>
-
-      <div className="mt-5">
-        {tab === 'material' && <UploadPanel courseId={courseId} />}
-        {tab === 'topics' && <TopicsPanel courseId={courseId} />}
-        {tab === 'roadmap' && <RoadmapPanel courseId={courseId} />}
-        {tab === 'lessons' && <LessonsPanel courseId={courseId} />}
-        {tab === 'tutor' && <TutorPanel courseId={courseId} />}
-        {tab === 'practice' && <PracticePanel courseId={courseId} />}
-        {tab === 'progress' && <ProgressPanel courseId={courseId} />}
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <a
+          href="/courses"
+          className="text-[11.5px] uppercase tracking-[0.12em] text-text-muted no-underline hover:text-text"
+        >
+          ← All courses
+        </a>
+        <p className="chip">{active.hint}</p>
       </div>
-    </main>
+
+      <header>
+        <h1 className="page-title">{course.title}</h1>
+        <p className="mt-2 flex flex-wrap items-center gap-1">
+          <span className="chip">{course.level}</span>
+          <span className="chip">
+            {course.language === 'mixed' ? 'Bangla + English' : course.language === 'bn' ? 'Bangla' : 'English'}
+          </span>
+          <span className="chip">{course.status}</span>
+          {course.examDate !== null && (
+            <span className="chip">Exam {course.examDate.slice(0, 10)}</span>
+          )}
+        </p>
+      </header>
+
+      <Tabs value={tab} onValueChange={(value) => setTab(value as CourseTab)}>
+        <TabsList aria-label="Course sections" className="w-full justify-start overflow-x-auto">
+          {TABS.map((entry) => (
+            <TabsTrigger key={entry.kind} value={entry.kind} className="flex-none px-3.5 text-[13px]">
+              {entry.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent value="material" className="mt-3">
+          <div className="card p-5"><UploadPanel courseId={courseId} /></div>
+        </TabsContent>
+        <TabsContent value="topics" className="mt-3">
+          <div className="card p-5"><TopicsPanel courseId={courseId} /></div>
+        </TabsContent>
+        <TabsContent value="roadmap" className="mt-3">
+          <div className="card p-5"><RoadmapPanel courseId={courseId} /></div>
+        </TabsContent>
+        <TabsContent value="lessons" className="mt-3">
+          <div className="card p-4 sm:p-5"><LessonsPanel courseId={courseId} /></div>
+        </TabsContent>
+        <TabsContent value="tutor" className="mt-3">
+          <div className="card p-5"><TutorPanel courseId={courseId} /></div>
+        </TabsContent>
+        <TabsContent value="practice" className="mt-3">
+          <div className="card p-5"><PracticePanel courseId={courseId} /></div>
+        </TabsContent>
+        <TabsContent value="progress" className="mt-3">
+          <div className="card p-5"><ProgressPanel courseId={courseId} /></div>
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }

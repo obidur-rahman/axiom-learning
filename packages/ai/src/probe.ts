@@ -1,6 +1,7 @@
 import type { Capabilities, ProviderConfig } from './config';
 import { EMPTY_CAPABILITIES } from './config';
 import { chat, embed, normalizeBaseUrl } from './client';
+import { getFetch } from './http';
 
 function strip(text: string): string {
   return text.replace(/^\s*```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
@@ -88,31 +89,59 @@ export async function probeCapabilities(
 /** Common local OpenAI-compatible endpoint ports (pivot plan). */
 export const LOCAL_PORTS = [11434, 1234, 8080] as const;
 
+/** A reachable local endpoint and the model IDs it advertises. */
+export interface LocalProviderDetection {
+  baseUrl: string;
+  models: string[];
+}
+
 /**
  * Auto-detect a local endpoint on startup. Probes common ports for
  * OpenAI-compatible /v1/models. Returns the first base URL that answers
- * with a model list, or null.
+ * with a non-empty model list, or null.
  */
 export async function detectLocalProvider(
   options: { ports?: readonly number[]; timeoutMs?: number } = {},
-): Promise<string | null> {
+): Promise<LocalProviderDetection | null> {
   const ports = options.ports ?? LOCAL_PORTS;
   const timeoutMs = options.timeoutMs ?? 1_500;
   for (const port of ports) {
     const baseUrl = `http://localhost:${port}`;
     try {
-      const response = await fetch(`${normalizeBaseUrl(baseUrl)}/models`, {
+      const response = await getFetch()(`${normalizeBaseUrl(baseUrl)}/models`, {
         headers: localProbeHeaders,
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!response.ok) continue;
       const body = (await response.json()) as { data?: unknown };
-      if (Array.isArray(body.data) && body.data.length > 0) {
-        return baseUrl;
-      }
+      if (!Array.isArray(body.data)) continue;
+      const models = body.data
+        .map((entry) =>
+          typeof (entry as { id?: unknown }).id === 'string'
+            ? (entry as { id: string }).id
+            : null,
+        )
+        .filter((id): id is string => id !== null);
+      if (models.length > 0) return { baseUrl, models };
     } catch {
       // Port closed or not OpenAI-compatible: try the next one.
     }
   }
   return null;
+}
+
+/**
+ * Split a local server's model list into the chat and embedding roles.
+ * Embedding IDs contain "embed"; chat prefers an explicit chat/instruct
+ * model, otherwise the first non-embedding model in server order.
+ */
+export function pickLocalModels(models: readonly string[]): {
+  chatModel: string;
+  embedModel: string;
+} {
+  const embedModel = models.find((id) => /embed/i.test(id)) ?? '';
+  const chatCandidates = models.filter((id) => !/embed/i.test(id));
+  const chatModel =
+    chatCandidates.find((id) => /instruct|chat/i.test(id)) ?? chatCandidates[0] ?? '';
+  return { chatModel, embedModel };
 }

@@ -11,6 +11,7 @@ import {
 } from '@axiom/data';
 import { onAppEvent } from '../lib/events';
 import { getDb } from '../lib/db';
+import { usePrefs } from '../lib/prefs';
 
 interface PlanRow {
   id: string;
@@ -26,7 +27,7 @@ const STATUSES: { value: ProgressStatus; label: string }[] = [
   { value: 'known', label: 'Known' },
 ];
 
-function loadPlan(db: DbDriver, courseId: string): Promise<PlanRow[]> {
+function loadPlan(db: DbDriver, courseId: string, includeSkipped: boolean): Promise<PlanRow[]> {
   return (async () => {
     const nodes = await db.select<Record<string, unknown>>(
       `SELECT n.topic_id, n.node_type, n.order_index, COALESCE(t.title, n.topic_id) AS title
@@ -47,7 +48,7 @@ function loadPlan(db: DbDriver, courseId: string): Promise<PlanRow[]> {
       seen.add(id);
       const nodeType = String(node['node_type'] ?? 'core');
       const status = progress.get(id) ?? 'not_started';
-      if (nodeType === 'skipped' && status === 'not_started') continue;
+      if (nodeType === 'skipped' && status === 'not_started' && !includeSkipped) continue;
       rows.push({
         id,
         title: String(node['title'] ?? id),
@@ -66,6 +67,7 @@ function loadPlan(db: DbDriver, courseId: string): Promise<PlanRow[]> {
  * local database, with no network.
  */
 export function ProgressPanel({ courseId }: { courseId: string }) {
+  const prefs = usePrefs();
   const [plan, setPlan] = useState<PlanRow[]>([]);
   const [examDate, setExamDate] = useState('');
   const [busy, setBusy] = useState(false);
@@ -87,13 +89,13 @@ export function ProgressPanel({ courseId }: { courseId: string }) {
 
   const load = useCallback(async () => {
     const db = await getDb();
-    setPlan(await loadPlan(db.driver, courseId));
+    setPlan(await loadPlan(db.driver, courseId, prefs.showSkippedInPlan));
     const rows = await db.driver.select<{ exam_date: string | null }>(
       'SELECT exam_date FROM courses WHERE id = $1',
       [courseId],
     );
     setExamDate((rows[0]?.exam_date ?? '').slice(0, 10));
-  }, [courseId]);
+  }, [courseId, prefs.showSkippedInPlan]);
 
   useEffect(() => {
     void load();
@@ -125,6 +127,7 @@ export function ProgressPanel({ courseId }: { courseId: string }) {
 
   const done = plan.filter((row) => row.status === 'done' || row.status === 'known').length;
   const inOrder = plan.filter((row) => row.inOrder);
+  const skippedRows = plan.filter((row) => !row.inOrder);
   const next = inOrder.find((row) => row.status === 'not_started' || row.status === 'in_progress');
 
   return (
@@ -141,7 +144,7 @@ export function ProgressPanel({ courseId }: { courseId: string }) {
               value={examDate}
               onChange={(event) => setExamDate(event.target.value)}
               onBlur={() => void saveExam()}
-              className="rounded-[10px] border border-border bg-surface px-2 py-1 text-sm text-text"
+              className="rounded-[var(--radius)] border border-border bg-surface px-2 py-1 text-sm text-text"
             />
           </label>
           <button
@@ -156,11 +159,11 @@ export function ProgressPanel({ courseId }: { courseId: string }) {
       {exportNote !== '' && <p className="text-xs text-text-muted" aria-live="polite">{exportNote}</p>}
 
       {next !== undefined && (
-        <div className="rounded-[10px] border border-accent bg-surface p-3">
+        <div className="rounded-[var(--radius)] border border-accent bg-surface p-3">
           <p className="text-xs text-text-muted">Next up</p>
           <p className="text-sm font-medium">{next.title}</p>
           <a
-            href={`?id=${courseId}&tab=lessons`}
+            href={`/course?id=${courseId}&tab=lessons`}
             className="mt-1 inline-block text-xs text-accent underline-offset-4 hover:underline"
           >
             Open its lesson
@@ -172,7 +175,7 @@ export function ProgressPanel({ courseId }: { courseId: string }) {
         {inOrder.map((row, index) => (
           <li
             key={row.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-surface px-3 py-2"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-surface px-3 py-2"
           >
             <div className="min-w-0">
               <p className="truncate text-sm">
@@ -184,7 +187,7 @@ export function ProgressPanel({ courseId }: { courseId: string }) {
               value={row.status}
               disabled={busy}
               onChange={(event) => void setStatus(row.id, event.target.value as ProgressStatus)}
-              className="rounded-[10px] border border-border bg-surface px-2 py-1 text-xs text-text"
+              className="rounded-[var(--radius)] border border-border bg-surface px-2 py-1 text-xs text-text"
             >
               {STATUSES.map((entry) => (
                 <option key={entry.value} value={entry.value}>
@@ -195,11 +198,25 @@ export function ProgressPanel({ courseId }: { courseId: string }) {
           </li>
         ))}
         {inOrder.length === 0 && (
-          <li className="rounded-[10px] border border-border bg-surface p-4 text-sm text-text-muted">
+          <li className="rounded-[var(--radius)] border border-border bg-surface p-4 text-sm text-text-muted">
             Build the roadmap first; the study plan follows it.
           </li>
         )}
       </ol>
+
+      {prefs.showSkippedInPlan && skippedRows.length > 0 && (
+        <section className="flex flex-col gap-2" aria-label="Skipped topics">
+          <p className="text-xs font-medium text-text-muted">Skipped in the roadmap</p>
+          <ul>
+            {skippedRows.map((row) => (
+              <li key={row.id} className="row flex items-center justify-between gap-2">
+                <p className="truncate text-[12.5px] text-text-muted">{row.title}</p>
+                <span className="chip">skipped</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <p className="text-xs text-text-muted">
         Progress is stored locally and survives offline use; the plan and

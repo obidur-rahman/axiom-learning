@@ -124,10 +124,11 @@ Empty state: If the Roadmap has no Core Nodes, the app shows "No exam Topics fou
 1. The Learner selects a Node. The Node page opens.
 2. If a Lesson exists, it shows at once.
 3. If it does not exist, the app shows a loading state and builds the Lesson.
-4. The Lesson shows text, formulas, and Citations.
-5. The Lesson ends with 3 check questions.
-6. The Learner selects Mark as done. The status changes to done.
-7. The app shows the next Node.
+4. The Lesson shows as short, navigable slides. Markdown is rendered, and formulas use KaTeX.
+5. The Learner can switch to Read all and can move through slides with the arrow keys.
+6. The Lesson ends with 3 check questions.
+7. The Learner selects Mark as done. The status changes to done.
+8. The app shows the next Node.
 
 Available actions on the Node page: Ask the Tutor, Practice, Report this Lesson, Not coming (mark skip), Delete Node.
 
@@ -265,3 +266,30 @@ Error states:
 - Show the same term for the same thing on all screens.
 - Provide each text in Bangla and in English.
 - Do not show model error text to the Learner.
+
+## 7. Desktop build: screens as shipped (2026-11-04)
+
+The desktop build has no Welcome or Sign up screens. The app opens on the
+Dashboard and needs no account. The routes below match the code in
+`apps/desktop/src/app`.
+
+| Route | Screen | Contents |
+|---|---|---|
+| `/` | Dashboard (SC-03 before the course list) | Greeting, study counts, next exam countdown, per-course progress and next topic, recent material, first-run path. |
+| `/courses` | Courses | Search, course cards with progress and counts, create form (title, level, language, exam date), delete. |
+| `/course?id=…` | Course workspace (SC-05 to SC-15) | Tabs: Material (upload + read status + search), Topics & scope, Roadmap (graph, list, history, bridge depth), Lessons (+ check questions), Tutor, Practice, Progress (study plan, exam date, export). |
+| `/settings` | Settings (SC-18, SC-19) | Appearance (Light / Dark / System, nine accent presets, translucent surfaces, sharp corners, compact density, reduce motion), Behaviour (tabs, percentages, countdown, citations, skipped topics, confirm-delete, toasts), Profile, Study, Materials, AI provider, Data export, Account, About. |
+
+Navigation map for this build:
+
+```
+Dashboard -> Courses -> Course workspace -> Material -> Topics & scope -> Roadmap
+                                        -> Lessons -> Tutor -> Practice -> Progress
+Any screen -> Settings (sidebar)
+Sidebar theme switch -> Light / Dark / System
+```
+
+Screens not in this build: SC-01, SC-02 (accounts), SC-11b and F16/F17
+(tutorial video), SC-16, SC-17 (share), and the SC-12 diagnostic flow. The
+Account section in Settings states this plainly instead of offering a
+non-working sign-in.

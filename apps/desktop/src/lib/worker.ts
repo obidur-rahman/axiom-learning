@@ -21,6 +21,7 @@ import {
 } from '@axiom/data';
 import { getDb } from './db';
 import { loadConfig } from './provider';
+import { installProviderFetch } from './provider-http';
 import { emitAppEvent } from './events';
 
 const IDLE_POLL_MS = 5_000;
@@ -95,6 +96,8 @@ async function runJob(job: JobRow, db: AxiomDb, driver: DbDriver): Promise<void>
 }
 
 async function loop(): Promise<void> {
+  // Pipeline model calls run in the webview too; use the desktop transport.
+  await installProviderFetch();
   const db = await getDb();
   const driver = db.driver;
   await requeueStuck(driver); // work off a stale backlog from earlier sessions

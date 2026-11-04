@@ -44,13 +44,4 @@ export function extractedToPages(
   }));
 }
 
-/**
- * File size limits (FR-022): 20 MB per file. Throws with a clear message.
- */
-export function assertFileSize(sizeBytes: number, limitMb = 20): void {
-  if (sizeBytes > limitMb * 1024 * 1024) {
-    throw new Error(`File is over the ${limitMb} MB limit.`);
-  }
-}
-
 export { EMPTY_TEXT_ERROR };

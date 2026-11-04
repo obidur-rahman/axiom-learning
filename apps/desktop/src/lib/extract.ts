@@ -18,6 +18,11 @@ interface PdfPageProxy {
 interface PdfDocumentProxy {
   numPages: number;
   getPage(pageNumber: number): Promise<PdfPageProxy>;
+}
+
+/** pdf.js v6 moved cleanup from the document proxy to the loading task. */
+interface PdfLoadingTask {
+  promise: Promise<PdfDocumentProxy>;
   destroy(): Promise<void>;
 }
 
@@ -28,9 +33,8 @@ export async function pdfPageToBase64Png(
   scale = 2,
 ): Promise<string> {
   const pdfjs = await loadPdfJs();
-  const doc = await pdfjs
-    .getDocument({ data, useSystemFonts: false, disableAutoFetch: true })
-    .promise;
+  const task = pdfjs.getDocument({ data, useSystemFonts: false, disableAutoFetch: true });
+  const doc = await task.promise;
   try {
     const page = await doc.getPage(pageNumber);
     const viewport = page.getViewport({ scale });
@@ -42,7 +46,7 @@ export async function pdfPageToBase64Png(
     await page.render({ canvasContext: context, viewport }).promise;
     return canvas.toDataURL('image/png').split(',')[1] ?? '';
   } finally {
-    await doc.destroy();
+    await task.destroy();
   }
 }
 
@@ -53,7 +57,7 @@ interface PdfJs {
     data: ArrayBuffer;
     useSystemFonts?: boolean;
     disableAutoFetch?: boolean;
-  }): { promise: Promise<PdfDocumentProxy> };
+  }): PdfLoadingTask;
   GlobalWorkerOptions: { workerSrc: string };
 }
 
@@ -71,21 +75,25 @@ async function loadPdfJs(): Promise<PdfJs> {
 /** Extracts the text layer of every PDF page; null text when it has none. */
 export async function extractPdfTextLayer(data: ArrayBuffer): Promise<ExtractedPage[]> {
   const pdfjs = await loadPdfJs();
-  const doc = await pdfjs.getDocument({ data, useSystemFonts: false, disableAutoFetch: true }).promise;
-  const pages: ExtractedPage[] = [];
-  for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
-    const page = await doc.getPage(pageNumber);
-    const content = await page.getTextContent();
-    const text = content.items.map((item) => item.str ?? '').join(' ').trim();
-    pages.push({
-      pageNumber,
-      text: text === '' ? null : text,
-      method: 'text_layer',
-      confidence: text === '' ? null : 1,
-    });
+  const task = pdfjs.getDocument({ data, useSystemFonts: false, disableAutoFetch: true });
+  const doc = await task.promise;
+  try {
+    const pages: ExtractedPage[] = [];
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+      const page = await doc.getPage(pageNumber);
+      const content = await page.getTextContent();
+      const text = content.items.map((item) => item.str ?? '').join(' ').trim();
+      pages.push({
+        pageNumber,
+        text: text === '' ? null : text,
+        method: 'text_layer',
+        confidence: text === '' ? null : 1,
+      });
+    }
+    return pages;
+  } finally {
+    await task.destroy();
   }
-  await doc.destroy();
-  return pages;
 }
 
 interface TessWorkerLike {
