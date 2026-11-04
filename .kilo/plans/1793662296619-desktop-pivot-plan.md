@@ -4,7 +4,8 @@
 Move Axiom Learning from a web app to a desktop app (Tauri) with a pluggable AI provider: any OpenAI-compatible endpoint (OpenRouter, OpenAI, local Ollama/LM Studio/vLLM). Keep the existing docs as the spec; update only the delivery model.
 
 ## Decisions
-- Desktop framework: Tauri (thin Rust shell, all business logic in TS/Next.js or a sidecar).
+- Desktop framework: Tauri v2 with NSIS installer (Windows-first). macOS and Linux later.
+- Tauri Rust surface stays minimal. All business logic in TS.
 - AI provider: a single OpenAI-compatible client configured by base URL + API key + model names. Covers hosted APIs and local endpoints.
 - Data: hybrid. No login needed to use own materials. Optional account (Supabase) only to fetch premade roadmaps / shared data.
 - Local models: user-run endpoint, not bundled. App does not ship inference runtime.
@@ -47,6 +48,16 @@ Move Axiom Learning from a web app to a desktop app (Tauri) with a pluggable AI 
 - Pipeline runs end-to-end with a local 7B model and with OpenRouter.
 - App starts offline and uses cached data.
 
-## Open questions
+## Caveats and how to address them (added)
+
+The scenario (printed sheet + past questions, no syllabus) exposes these weak points. Plan updates:
+
+1. OCR: keep `tesseract.js` as the default offline OCR (no download). Add an optional vision step via the AI provider when the configured model has vision capability. Mark low-confidence pages and offer paste-text fallback (already in PRD).
+2. Topic extraction: keep it a model task with manual editing (already in PRD). Add a "re-extract with hosted model" action when the local model fails schema validation twice.
+3. Chunking weak structure: fall back to fixed-size chunks (200-500 tokens) when no headings are found. Keep section path when headings exist.
+4. Prerequisite edges: prefer shared concept table; model proposal only as fallback; level-B check for low confidence (already in TRD 5.5).
+5. Model quality: surface a "switch to hosted API" hint when local model fails 3 jobs in a row.
+
+No downloadable OCR model is needed. tesseract.js plus optional vision via the provider covers the cases and keeps the app small.
 - Which Tauri version and bundler target (NSIS/MSI/dmg)?
 - Should the app auto-detect a running Ollama instance?

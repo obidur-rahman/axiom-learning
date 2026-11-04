@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.tauri.app/capability/2",
+  "identifier": "default",
+  "description": "Default capability for the main window: core access plus file dialogs.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "sql:default",
+    "sql:allow-execute"
+  ]
+}

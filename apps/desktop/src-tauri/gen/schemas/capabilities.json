@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capability for the main window: core access plus file dialogs.","local":true,"windows":["main"],"permissions":["core:default","dialog:default","sql:default","sql:allow-execute"]}}

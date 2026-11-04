@@ -1,0 +1,169 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { streamTutorAnswer, type TutorMessage } from '@axiom/pipeline';
+import { getDb } from '../lib/db';
+import { loadConfig } from '../lib/provider';
+
+/**
+ * Tutor chat (FR-058..FR-060): grounded streaming answers with page
+ * citations, the no-evidence sentence kept visible, and the Guide-me toggle
+ * (guiding question first). Three failures in a row offer the hosted
+ * provider; the lesson stays inside one thread per topic.
+ */
+export function TutorPanel({ courseId }: { courseId: string }) {
+  const [messages, setMessages] = useState<TutorMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [guideMode, setGuideMode] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const [streamText, setStreamText] = useState('');
+  const [failureCount, setFailureCount] = useState(0);
+  const [error, setError] = useState('');
+  const seeded = useRef(false);
+  const thread = useRef<TutorMessage[]>([]);
+
+  useEffect(() => {
+    setMessages([]);
+    setStreamText('');
+    setFailureCount(0);
+    seeded.current = true;
+  }, [courseId]);
+
+  const send = useCallback(async () => {
+    const question = input.trim();
+    if (question === '' || streaming) return;
+    setInput('');
+    setStreaming(true);
+    setStreamText('');
+    setError('');
+    const config = await loadConfig();
+    if (config === null) {
+      setError('No provider configured. Set it in Settings first.');
+      setStreaming(false);
+      return;
+    }
+    let gotDelta = false;
+    await streamTutorAnswer(
+      config,
+      courseId,
+      (await getDb()).driver,
+      question,
+      thread.current,
+      guideMode,
+      {
+        onDelta: (chunk) => {
+          gotDelta = true;
+          setStreamText((current) => current + chunk);
+        },
+        onDone: (citations) => {
+          const finalText = streamTextRef.current;
+          thread.current = [
+            ...thread.current,
+            { role: 'user', content: question, citations: [] } as TutorMessage,
+            { role: 'assistant', content: finalText, citations } as TutorMessage,
+          ];
+          setMessages([...thread.current]);
+          setStreamText('');
+          setStreaming(false);
+        },
+        onError: (caught) => {
+          setError(caught.message);
+          setFailureCount((count) => count + 1);
+          setStreaming(false);
+        },
+      },
+    );
+  }, [input, streaming, courseId, guideMode]);
+
+  // The onDone callback needs the accumulated text; keep a ref in sync.
+  const streamTextRef = useRef('');
+  useEffect(() => {
+    streamTextRef.current = streamText;
+  }, [streamText]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <label className="flex items-center gap-2 text-sm text-text-muted">
+        <input
+          type="checkbox"
+          checked={guideMode}
+          onChange={(event) => setGuideMode(event.target.checked)}
+          className="accent-[var(--color-accent)]"
+        />
+        Guide me first (ask guiding questions back)
+      </label>
+
+      <div className="flex max-h-[420px] min-h-[160px] flex-col gap-2 overflow-y-auto rounded-[10px] border border-border bg-surface p-3">
+        {messages.length === 0 && streamText === '' && (
+          <p className="text-sm text-text-muted">
+            Ask anything from this course. Answers only use your material pages
+            and show citations like [p.3]. When the material has nothing, the
+            tutor says so first.
+          </p>
+        )}
+        {messages.map((message, index) => (
+          <div
+            key={index}
+            className={
+              message.role === 'user'
+                ? 'self-end max-w-[80%] rounded-[10px] bg-accent/20 px-3 py-2 text-sm'
+                : 'max-w-[85%] rounded-[10px] border border-border bg-bg px-3 py-2 text-sm'
+            }
+          >
+            <p className="whitespace-pre-wrap">{message.content}</p>
+            {message.citations.length > 0 && (
+              <p className="mt-1 text-xs text-text-muted">
+                Sources: {message.citations.map((page) => `p.${page}`).join(', ')}
+              </p>
+            )}
+          </div>
+        ))}
+        {streaming && (
+          <div className="max-w-[85%] rounded-[10px] border border-border bg-bg px-3 py-2 text-sm">
+            <p className="whitespace-pre-wrap">
+              {streamText === '' ? 'Thinking...' : streamText}
+              <span aria-hidden className="animate-pulse">
+                |
+              </span>
+            </p>
+          </div>
+        )}
+      </div>
+
+      {error !== '' && (
+        <p className="rounded-[10px] border border-danger/40 bg-surface px-3 py-2 text-sm text-danger">
+          {error}
+          {failureCount >= 3 && (
+            <>
+              {' '}
+              The local model keeps failing.{' '}
+              <a href="/settings" className="text-accent underline-offset-4 hover:underline">
+                Try a hosted provider in Settings
+              </a>
+              .
+            </>
+          )}
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void send();
+          }}
+          placeholder="Ask about a topic..."
+          className="flex-1 rounded-[10px] border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+        />
+        <button
+          onClick={() => void send()}
+          disabled={input.trim() === '' || streaming}
+          className="rounded-[10px] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90 disabled:opacity-40"
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
