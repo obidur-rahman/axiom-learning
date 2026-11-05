@@ -65,7 +65,29 @@ Shipped in this build:
   rejected when the local reader cannot parse it.
 - Background pipeline runs app-wide (not only while a course is open); the
   Windows keyring commands now match the TypeScript bridge.
+- Adaptive study (schema v2): per-course study settings with three profiles
+  (`past_first`, `notes_first`, `adaptive`), daily study minutes, and a
+  deterministic planner in `packages/engine`. The new Study tab shows today’s
+  plan, the question ladder, coverage, repeated patterns and a human review
+  queue for extracted questions.
+- Past-paper question bank: past papers are extracted into draft question rows
+  with year, marks, type, difficulty, topic links and citation pages. Nothing
+  is auto-confirmed; the learner edits and confirms in Question review. Topic
+  weights use confirmed past-question counts when they exist.
+- Generated questions from notes for topics with no past papers, always
+  labelled “Generated from notes - not a past paper” and never given invented
+  past-paper statistics.
+- Teaching board: lessons are built one beat at a time (hook, intuition,
+  worked example, contrast, note anchor, recall, exam-answer shape) with
+  structured blocks, page citations and a check question. Old Markdown lessons
+  still open as slides, and the lesson format is a global preference.
+- Dashboard today plan: the next three deterministic study items for the
+  course closest to its exam, with a deep link into the Study tab.
+- Mock exam: assemble up to ten confirmed questions into a deterministic
+  paper, write answers, reveal the model answers and self-mark each question.
+  The result is saved as attempts so weak topics feed the next plan.
 
 Not in this build (documented, intentionally absent): optional cloud account and
 Supabase sync, premade roadmap catalog, share links, tutorial video, daily
-limits for hosted APIs, and the diagnostic flow for bridge nodes.
+limits for hosted APIs, the diagnostic flow for bridge nodes, and proctored or
+auto-marked mock exams.

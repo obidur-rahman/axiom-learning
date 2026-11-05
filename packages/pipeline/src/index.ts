@@ -2,6 +2,8 @@ export * from './prompts';
 export * from './read';
 export * from './steps';
 export * from './lessons';
+export * from './questions';
+export * from './teach';
 export * from './embeddings';
 export * from './tutor';
 export * from './practice';

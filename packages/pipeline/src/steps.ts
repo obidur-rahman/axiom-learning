@@ -3,6 +3,7 @@ import { ProviderError, chatJson, type ProviderConfig } from '@axiom/ai';
 import {
   buildAndSaveRoadmap,
   getProviderSettings,
+  pastQuestionCounts as confirmedPastQuestionCounts,
   replaceEdges,
   saveProviderSettings,
   settingsToProviderConfig,
@@ -58,6 +59,7 @@ export async function boundedModelTask<T>(
   prompt: PromptSpec,
   userContent: string,
   schema: z.ZodType<T>,
+  options: { temperature?: number; maxTokens?: number } = {},
 ): Promise<T> {
   const config = await ctx.config();
   if (config === null) {
@@ -72,7 +74,7 @@ export async function boundedModelTask<T>(
         { role: 'system', content: prompt.system },
         { role: 'user', content: userContent },
       ],
-      { retries: 2, temperature: 0 },
+      { retries: 2, temperature: options.temperature ?? 0, maxTokens: options.maxTokens },
     ));
   } catch (error) {
     // Schema-validated failures after the retry budget surface as a schema
@@ -132,8 +134,17 @@ export async function recalculateWeights(ctx: RunContext): Promise<Record<string
     .map((row) => row.text!)
     .join('\n');
   const pastQuestionCounts: Record<string, number> = {};
-  for (const topic of topicRows) {
-    pastQuestionCounts[topic.id] = countMentions(topic.title, pastText);
+  const confirmedCounts = await confirmedPastQuestionCounts(ctx.db.driver, ctx.course.id);
+  if (Object.keys(confirmedCounts).length > 0) {
+    // Confirmed real questions are a stronger importance signal than a title
+    // mention in the past-paper text.
+    for (const topic of topicRows) {
+      pastQuestionCounts[topic.id] = confirmedCounts[topic.id] ?? 0;
+    }
+  } else {
+    for (const topic of topicRows) {
+      pastQuestionCounts[topic.id] = countMentions(topic.title, pastText);
+    }
   }
   const inSyllabus = new Set(topicRows.map((row) => row.id));
   const weights = computeWeights(

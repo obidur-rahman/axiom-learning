@@ -12,7 +12,9 @@ export type JobType =
   | 'find_prerequisites'
   | 'build_roadmap'
   | 'build_lesson'
-  | 'make_practice';
+  | 'make_practice'
+  | 'extract_past_questions'
+  | 'generate_questions';
 
 export interface JobRow {
   id: string;

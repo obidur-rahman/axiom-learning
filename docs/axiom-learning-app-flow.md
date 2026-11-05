@@ -277,13 +277,13 @@ Dashboard and needs no account. The routes below match the code in
 |---|---|---|
 | `/` | Dashboard (SC-03 before the course list) | Greeting, study counts, next exam countdown, per-course progress and next topic, recent material, first-run path. |
 | `/courses` | Courses | Search, course cards with progress and counts, create form (title, level, language, exam date), delete. |
-| `/course?id=…` | Course workspace (SC-05 to SC-15) | Tabs: Material (upload + read status + search), Topics & scope, Roadmap (graph, list, history, bridge depth), Lessons (+ check questions), Tutor, Practice, Progress (study plan, exam date, export). |
+| `/course?id=…` | Course workspace (SC-05 to SC-15) | Tabs: Material (upload + read status + search), Study (today plan, question ladder, review, patterns), Topics & scope, Roadmap (graph, list, history, bridge depth), Lessons (teaching board / slides / read), Tutor, Practice, Progress (study plan, exam date, export). |
 | `/settings` | Settings (SC-18, SC-19) | Appearance (Light / Dark / System, nine accent presets, translucent surfaces, sharp corners, compact density, reduce motion), Behaviour (tabs, percentages, countdown, citations, skipped topics, confirm-delete, toasts), Profile, Study, Materials, AI provider, Data export, Account, About. |
 
 Navigation map for this build:
 
 ```
-Dashboard -> Courses -> Course workspace -> Material -> Topics & scope -> Roadmap
+Dashboard -> Courses -> Course workspace -> Material -> Study -> Topics & scope -> Roadmap
                                         -> Lessons -> Tutor -> Practice -> Progress
 Any screen -> Settings (sidebar)
 Sidebar theme switch -> Light / Dark / System
@@ -293,3 +293,79 @@ Screens not in this build: SC-01, SC-02 (accounts), SC-11b and F16/F17
 (tutorial video), SC-16, SC-17 (share), and the SC-12 diagnostic flow. The
 Account section in Settings states this plainly instead of offering a
 non-working sign-in.
+
+## 8. Adaptive study flow (schema v2)
+
+### F18: Choose a study style when creating a course
+
+1. The learner enters the title, level, language and exam date.
+2. The learner selects one style: Past questions first, Notes first, or
+   Adaptive mix. The default comes from Settings.
+3. The learner sets daily study minutes (15–240) and says whether the course
+   has past papers.
+4. The app creates the course and its `course_study_settings` row.
+
+The learner can change all three later in the Study tab. Changing a setting
+increments `plan_version`.
+
+### F19: Turn a past paper into questions
+
+1. The learner uploads a material with kind Past paper in Material.
+2. The learner opens Study and selects Extract past-paper questions.
+3. The job copies question text into `exam_questions` as drafts. It never
+   invents a year or marks, and it links topics it can resolve.
+4. The review block lists each draft with source, year, marks, type, difficulty
+   and pages. The learner edits, confirms, rejects, or selects Confirm all.
+5. Only confirmed questions enter the question ladder and today’s plan.
+
+### F20: Generate questions from notes
+
+1. For a topic with no confirmed past question, the learner selects Generate
+   questions from notes.
+2. The job generates 2–4 drafts with an answer, key points and page citations.
+3. The UI labels every generated row “Generated from notes - not a past
+   paper”. It never shows past-paper counts for generated questions.
+
+### F21: Study from today’s plan
+
+1. The Study tab shows the exam countdown, profile, daily minutes and coverage.
+2. Today’s items are deterministic and timeboxed to the daily minutes. Each
+   item shows why it is next and how long it takes.
+3. A lesson item opens the Lessons tab. A question or recall item opens an
+   answer panel. The learner writes an answer, may reveal the model answer,
+   and grades it Got it, Partly, Missed it or Skip.
+4. The attempt is saved to `study_attempts`, and the plan is recomputed.
+5. The dashboard shows the next three items for the course closest to its exam.
+
+### F22: Sit a mock exam
+
+1. With at least one confirmed question, the Study tab shows Mock exam.
+2. The app assembles up to ten confirmed questions, past papers first and
+   easiest first within each source. The paper is not timed or proctored.
+3. The learner writes answers, submits, and compares each answer with the model
+   answer.
+4. The learner marks each answer Full, Half or Zero. The app shows the total.
+5. Saving the result writes one `study_attempts` row per question with
+   `item_kind = 'mock'`. The next plan treats missed topics as weak.
+
+### F23: Read a teaching lesson
+
+1. The learner generates a lesson for a topic.
+2. The app writes one teaching beat per model call: hook, intuition, worked
+   example, contrast, note anchor, recall, exam-answer shape.
+3. Each beat has a claim title, a short explanation and at most one visual
+   block. A worked beat uses numbered steps. A recall beat hides its answer.
+4. The learner can move with the beat list or the action strip, and can present
+   the same board full screen.
+5. If the model fails, the beat falls back to the cited note text and a Tutor
+   link. Lessons saved before this build still open as slides or Read all.
+
+### Empty and error states
+
+| State | What the Study tab shows |
+|---|---|
+| No topics | A link to Material and Topics; no fake plan. |
+| No past papers | A notice that generated questions come from notes and are labelled. |
+| No provider | The job fails with a plain message and a retry action. |
+| Drafts waiting | The review block appears above the ladder. |
+| Model fails twice | The beat keeps the note excerpt and links to the Tutor. |

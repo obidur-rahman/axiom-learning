@@ -11,9 +11,12 @@ import {
   createCourse,
   deleteCourse,
   courseSummaries,
+  ensureStudySettings,
+  saveStudySettings,
   type CourseLevel,
   type CourseSummary,
   type CourseLanguage,
+  type StudyProfile,
 } from '@axiom/data';
 import { getDb, isDesktopRuntime } from '../lib/db';
 import { usePrefs } from '../lib/prefs';
@@ -37,6 +40,24 @@ const LANGUAGE_LABEL: Record<CourseLanguage, string> = {
   mixed: 'Bangla + English',
 };
 
+const PROFILE_OPTIONS: { value: StudyProfile; label: string; hint: string }[] = [
+  {
+    value: 'past_first',
+    label: 'Past questions first',
+    hint: 'Start from real past questions, easiest to hardest, then fill gaps with notes.',
+  },
+  {
+    value: 'notes_first',
+    label: 'Notes first',
+    hint: 'Learn each concept from your notes, then practice generated questions.',
+  },
+  {
+    value: 'adaptive',
+    label: 'Adaptive mix',
+    hint: 'A short diagnostic, then weak topics, then mixed review.',
+  },
+];
+
 export function CourseLibrary() {
   const router = useRouter();
   const prefs = usePrefs();
@@ -47,6 +68,9 @@ export function CourseLibrary() {
   const [level, setLevel] = useState<CourseLevel>('university');
   const [language, setLanguage] = useState<CourseLanguage>(prefs.language);
   const [examDate, setExamDate] = useState('');
+  const [profile, setProfile] = useState<StudyProfile>(prefs.defaultStudyProfile);
+  const [dailyMinutes, setDailyMinutes] = useState(prefs.defaultDailyMinutes);
+  const [hasPastPapers, setHasPastPapers] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
 
@@ -80,6 +104,12 @@ export function CourseLibrary() {
         examDate: examDate === '' ? null : examDate,
         bridgeDepth: prefs.defaultBridgeDepth,
       });
+      await ensureStudySettings(db.driver, course.id);
+      await saveStudySettings(db.driver, course.id, {
+        profile,
+        dailyMinutes: Math.min(240, Math.max(15, dailyMinutes)),
+        hasPastPapers,
+      });
       setTitle('');
       setExamDate('');
       setFormOpen(false);
@@ -89,7 +119,18 @@ export function CourseLibrary() {
     } finally {
       setBusy(false);
     }
-  }, [title, level, language, examDate, busy, router, prefs.defaultBridgeDepth]);
+  }, [
+    title,
+    level,
+    language,
+    examDate,
+    busy,
+    router,
+    prefs.defaultBridgeDepth,
+    profile,
+    dailyMinutes,
+    hasPastPapers,
+  ]);
 
   const handleDelete = useCallback(
     async (summary: CourseSummary) => {
@@ -219,7 +260,54 @@ export function CourseLibrary() {
                 className="input"
               />
             </label>
-            <div className="flex items-end justify-end gap-2">
+            <div className="field sm:col-span-2">
+              <span>How do you want to study this course?</span>
+              <div role="radiogroup" aria-label="Study profile" className="mt-2 grid gap-2 sm:grid-cols-3">
+                {PROFILE_OPTIONS.map((option) => {
+                  const selected = profile === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setProfile(option.value)}
+                      className={`rounded-[var(--radius)] border p-3 text-left transition-colors ${
+                        selected
+                          ? 'border-accent bg-accent-soft'
+                          : 'border-border bg-surface hover:border-border-strong'
+                      }`}
+                    >
+                      <span className="block text-[13px] font-medium">{option.label}</span>
+                      <span className="mt-1 block text-[11.5px] leading-snug text-text-muted">{option.hint}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <label className="field">
+              Daily study time
+              <input
+                type="number"
+                min={15}
+                max={240}
+                step={5}
+                value={dailyMinutes}
+                onChange={(event) => setDailyMinutes(Number(event.target.value))}
+                className="input"
+              />
+              <span className="text-[11.5px] text-text-muted">Used to size your daily plan. Change it any time.</span>
+            </label>
+            <label className="flex items-center gap-2.5 self-end pb-1 text-[13px]">
+              <input
+                type="checkbox"
+                checked={hasPastPapers}
+                onChange={(event) => setHasPastPapers(event.target.checked)}
+                className="size-4"
+              />
+              I have past papers for this course
+            </label>
+            <div className="flex items-end justify-end gap-2 sm:col-span-2">
               {!empty && (
                 <button type="button" className="btn btn-quiet" onClick={() => setFormOpen(false)}>
                   Cancel

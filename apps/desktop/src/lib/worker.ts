@@ -6,13 +6,17 @@
 import {
   buildLessonStep,
   buildRoadmapStep,
+  buildTeachingLesson,
   buildTopicsStep,
+  extractPastQuestionsStep,
+  generateQuestionsStep,
   type RunContext,
 } from '@axiom/pipeline';
 import {
   claimNext,
   complete,
   fail,
+  getActiveLesson,
   requeueStuck,
   type AxiomDb,
   type Course,
@@ -72,9 +76,35 @@ async function runJob(job: JobRow, db: AxiomDb, driver: DbDriver): Promise<void>
       if (topicId === '') throw new Error('build_lesson requires a topicId in the payload');
       const rawDepth = String(payload.depth ?? 'core');
       const depth: 'core' | 'bridge' = rawDepth === 'bridge' ? 'bridge' : 'core';
-      await buildLessonStep(driver, job.courseId, topicId, loadConfig, depth);
+      const course = await requireCourse(driver, job.courseId);
+      const ctx: RunContext = { db, course, config: loadConfig };
+      let lessonId: string | null = null;
+      try {
+        const result = await buildTeachingLesson(ctx, topicId, { depth });
+        lessonId = result.lessonId;
+      } catch {
+        // Teaching board failed: keep the older Markdown lesson working.
+        await buildLessonStep(driver, job.courseId, topicId, loadConfig, depth);
+        const active = await getActiveLesson(driver, topicId, 'mixed', depth);
+        lessonId = active?.id ?? null;
+      }
       await complete(driver, job.id);
-      emitAppEvent({ kind: 'lesson-ready', courseId: job.courseId, topicId, lessonId: job.id });
+      emitAppEvent({
+        kind: 'lesson-ready',
+        courseId: job.courseId,
+        topicId,
+        lessonId: lessonId ?? job.id,
+      });
+    } else if (job.jobType === 'extract_past_questions') {
+      const course = await requireCourse(driver, job.courseId);
+      const ctx: RunContext = { db, course, config: loadConfig };
+      await extractPastQuestionsStep(ctx);
+      await complete(driver, job.id);
+    } else if (job.jobType === 'generate_questions') {
+      const course = await requireCourse(driver, job.courseId);
+      const ctx: RunContext = { db, course, config: loadConfig };
+      await generateQuestionsStep(ctx);
+      await complete(driver, job.id);
     } else {
       // Unknown kind: finish it so the queue does not clog.
       await complete(driver, job.id);

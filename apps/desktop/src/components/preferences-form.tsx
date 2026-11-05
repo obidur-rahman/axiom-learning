@@ -14,7 +14,9 @@ import {
   usePrefs,
   type AccentName,
   type CourseTab,
+  type LessonFormat,
   type PrefsLanguage,
+  type StudyProfile,
   type StudyDepth,
   type ThemeMode,
 } from '../lib/prefs';
@@ -58,12 +60,25 @@ const LESSON_DEPTH_OPTIONS: { value: StudyDepth; label: string }[] = [
 
 const COURSE_TAB_OPTIONS: { value: CourseTab; label: string }[] = [
   { value: 'material', label: 'Material' },
+  { value: 'study', label: 'Study' },
   { value: 'topics', label: 'Topics & scope' },
   { value: 'roadmap', label: 'Roadmap' },
   { value: 'lessons', label: 'Lessons' },
   { value: 'tutor', label: 'Tutor' },
   { value: 'practice', label: 'Practice' },
   { value: 'progress', label: 'Progress' },
+];
+
+const STUDY_PROFILE_OPTIONS: { value: StudyProfile; label: string }[] = [
+  { value: 'past_first', label: 'Past questions first' },
+  { value: 'notes_first', label: 'Notes first' },
+  { value: 'adaptive', label: 'Adaptive mix' },
+];
+
+const LESSON_FORMAT_OPTIONS: { value: LessonFormat; label: string }[] = [
+  { value: 'board', label: 'Guided board' },
+  { value: 'slides', label: 'Slide deck' },
+  { value: 'read', label: 'Read all' },
 ];
 
 function PrefSelect<T extends string>({
@@ -104,7 +119,7 @@ function ThemeSwatch({ mode, accent }: { mode: ThemeMode; accent: string }) {
       <span
         aria-hidden
         className="theme-swatch"
-        style={{ background: 'linear-gradient(110deg, #eff1f5 0 50%, #1e1e2e 50% 100%)' }}
+        style={{ background: '#1e1e2e' }}
       >
         <span className="flex-1" style={{ background: '#e6e9ef' }} />
         <span className="flex-1" style={{ background: '#313244' }} />
@@ -327,6 +342,46 @@ export function StudySettings() {
   const prefs = usePrefs();
   return (
     <div className="flex flex-col gap-1">
+      <div className="field py-3">
+        <span>Default study profile</span>
+        <PrefSelect
+          value={prefs.defaultStudyProfile}
+          onValueChange={(value) => savePrefs({ defaultStudyProfile: value })}
+          options={STUDY_PROFILE_OPTIONS}
+          ariaLabel="Default study profile"
+        />
+        <span className="text-[12px] text-text-muted">
+          New courses start here. Each course can choose its own style in the Study tab.
+        </span>
+      </div>
+
+      <div className="field py-3">
+        <span>Default daily study time</span>
+        <input
+          type="number"
+          min={15}
+          max={240}
+          step={5}
+          value={prefs.defaultDailyMinutes}
+          onChange={(event) => savePrefs({ defaultDailyMinutes: Number(event.target.value) })}
+          className="input"
+        />
+        <span className="text-[12px] text-text-muted">Used to size the daily plan for new courses.</span>
+      </div>
+
+      <div className="field py-3">
+        <span>Lesson format</span>
+        <PrefSelect
+          value={prefs.lessonFormat}
+          onValueChange={(value) => savePrefs({ lessonFormat: value })}
+          options={LESSON_FORMAT_OPTIONS}
+          ariaLabel="Lesson format"
+        />
+        <span className="text-[12px] text-text-muted">
+          Guided board teaches beat by beat. Slide deck and Read all are the simpler fallbacks.
+        </span>
+      </div>
+
       <div className="field py-3">
         <span>Default lesson depth</span>
         <PrefSelect

@@ -5,14 +5,17 @@ import {
   enqueue,
   flagLesson,
   getActiveLesson,
+  getLessonDocument,
   type DbDriver,
   type Lesson,
+  type LessonDocument,
 } from '@axiom/data';
-import { BookOpen, Layers, RefreshCw } from 'lucide-react';
+import { BookOpen, Layers, ListTree, RefreshCw } from 'lucide-react';
 import { getDb } from '../lib/db';
 import { onAppEvent } from '../lib/events';
 import { parseLessonContent } from '../lib/lesson-content';
 import { loadPrefs, usePrefs } from '../lib/prefs';
+import { LessonBoard } from './lesson-board';
 import { LessonDeck } from './lesson-deck';
 import { Markdown } from './markdown';
 
@@ -54,16 +57,19 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
   const [topicId, setTopicId] = useState('');
   const [depth, setDepth] = useState<'core' | 'bridge'>('core');
   const [lesson, setLesson] = useState<Lesson | null>(null);
+  const [document, setDocument] = useState<LessonDocument | null>(null);
   const [answers, setAnswers] = useState<string[]>(['', '', '']);
   const [shown, setShown] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [view, setView] = useState<'slides' | 'read'>('slides');
+  const [view, setView] = useState<'board' | 'slides' | 'read'>('board');
 
   const loadLesson = useCallback(async (target: string, forDepth: string) => {
     if (target === '') return;
     const db = await getDb();
-    setLesson(await getActiveLesson(db.driver, target, 'mixed', forDepth));
+    const loaded = await getActiveLesson(db.driver, target, 'mixed', forDepth);
+    setLesson(loaded);
+    setDocument(loaded === null ? null : await getLessonDocument(db.driver, loaded.id));
   }, []);
 
   useEffect(() => {
@@ -81,7 +87,7 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
   }, [courseId, loadLesson]);
 
   useEffect(() => {
-    setView('slides');
+    setView(loadPrefs().lessonFormat === 'read' ? 'read' : loadPrefs().lessonFormat === 'slides' ? 'slides' : 'board');
     setAnswers(['', '', '']);
     setShown([]);
   }, [lesson?.id]);
@@ -216,7 +222,7 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
               </h2>
               <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <span className="chip">{depth === 'core' ? 'Full lesson' : 'Quick recap'}</span>
-                <span className="chip">{slides.length} slides</span>
+                <span className="chip">{document === null ? `${slides.length} slides` : `${document.beats.length} teaching beats`}</span>
                 {questions.length > 0 && <span className="chip">{questions.length} check questions</span>}
               </p>
             </div>
@@ -226,6 +232,17 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
               role="group"
               aria-label="Lesson view"
             >
+              <button
+                type="button"
+                aria-pressed={view === 'board'}
+                onClick={() => setView('board')}
+                className={`inline-flex items-center gap-1.5 rounded-[calc(var(--radius)-2px)] px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
+                  view === 'board' ? 'bg-accent text-accent-contrast' : 'text-text-muted hover:text-text'
+                }`}
+              >
+                <ListTree className="size-3.5" aria-hidden />
+                Board
+              </button>
               <button
                 type="button"
                 aria-pressed={view === 'slides'}
@@ -251,7 +268,9 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
             </div>
           </div>
 
-          {view === 'slides' ? (
+          {view === 'board' && document !== null ? (
+            <LessonBoard key={lesson.id} document={document} onRegenerate={() => void generate()} busy={busy} />
+          ) : view === 'slides' ? (
             <LessonDeck
               key={lesson.id}
               title={activeTopic?.title ?? parsed.title}
@@ -264,6 +283,7 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
             />
           ) : (
             <article className="rounded-[var(--radius-card)] border border-border bg-panel p-5 sm:p-6">
+              {view === 'board' && <p className="mb-3 text-[12.5px] text-text-muted">This saved lesson uses the older slide format.</p>}
               <Markdown content={parsed.readMarkdown} />
             </article>
           )}
@@ -289,8 +309,8 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
         <div className="rounded-[var(--radius)] border border-dashed border-border-strong bg-surface p-5">
           <p className="text-[14px] font-medium">No lesson for this topic yet</p>
           <p className="mt-1 max-w-[60ch] text-[13px] leading-relaxed text-text-muted">
-            Press Generate. Axiom builds a short, cited slide deck from your material, plus three questions to test
-            yourself.
+            Press Generate. Axiom builds a guided teaching board from your material - explanations, a worked example,
+            recall and exam-answer shape - plus check questions. Old lessons still open as slides.
           </p>
         </div>
       )}

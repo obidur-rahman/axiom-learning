@@ -54,8 +54,32 @@ export async function exportCourse(
     'SELECT * FROM topic_edges WHERE course_id = $1',
     [courseId],
   );
+  const [studySettings, questions, questionTopics, attempts, lessonDocuments] = await Promise.all([
+    db.select<Record<string, unknown>>(
+      'SELECT * FROM course_study_settings WHERE course_id = $1',
+      [courseId],
+    ),
+    db.select<Record<string, unknown>>(
+      'SELECT * FROM exam_questions WHERE course_id = $1 ORDER BY year DESC, question_number',
+      [courseId],
+    ),
+    db.select<Record<string, unknown>>(
+      `SELECT q.* FROM exam_question_topics q
+       JOIN exam_questions e ON e.id = q.question_id WHERE e.course_id = $1`,
+      [courseId],
+    ),
+    db.select<Record<string, unknown>>(
+      'SELECT * FROM study_attempts WHERE course_id = $1 ORDER BY completed_at DESC',
+      [courseId],
+    ),
+    db.select<Record<string, unknown>>(
+      `SELECT d.* FROM lesson_documents d
+       JOIN lessons l ON l.id = d.lesson_id WHERE l.course_id = $1`,
+      [courseId],
+    ),
+  ]);
   return {
-    format: 'axiom-course-export/1',
+    format: 'axiom-course-export/2',
     exportedAt: new Date().toISOString(),
     course: course[0] ?? null,
     materials,
@@ -68,5 +92,10 @@ export async function exportCourse(
     progress: progressRows,
     lessons: lessonRows,
     lessonReports: reports,
+    studySettings,
+    questions,
+    questionTopics,
+    attempts,
+    lessonDocuments,
   };
 }

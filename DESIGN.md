@@ -48,6 +48,31 @@ consistency, and calm outrank expression; craft lives in the details.
 - Headings carry themselves: no kicker/eyebrow above a page heading.
 - Node status still pairs color with label (principle 4 unchanged).
 
+## Teaching board and study ladder
+
+- **One idea per beat.** The lesson board shows a context rail (objective,
+  beat list, cited pages, Present) and one teaching beat at a time. A beat has
+  a claim as its title, at most two short text blocks and one visual block.
+- **Visual grammar.** Structured blocks only: text, numbered steps, comparison
+  table, equation, code with trace, callout (trap/tip/note), flow, and recall.
+  No image generation and no arbitrary HTML.
+- **Answer shape.** A worked beat uses numbered steps. A recall beat hides its
+  answer until requested. An exam-shape beat names what the marker looks for
+  and the trap that loses marks.
+- **Actions.** Back, Show example, Your turn, Explain again, Next. Arrow keys,
+  Home/End and Escape work in Present mode; Present is the same board full
+  screen, not a second deck.
+- **Legacy fallback.** Lessons saved before the teaching board still open in
+  the slide deck or Read all view. Board, Slides and Read all are always
+  available; the default comes from Settings.
+- **Study ladder.** Real past questions and generated questions use different
+  labels and never share statistics. The ladder is grouped by topic and sorted
+  easiest to hardest. A generated row always says "Generated from notes - not
+  a past paper".
+- **Draft review.** Extracted questions appear in a review block above the
+  ladder with Confirm, Reject and Confirm all. A draft never enters today’s
+  plan.
+
 ## Tokens (CSS custom props in apps/desktop/src/app/globals.css)
 - Theme: resolved `data-theme` is `light` (Latte) or `dark` (Mocha); the
   stored preference is `light`, `dark` or `system`. A pre-paint script applies

@@ -159,7 +159,8 @@ export const MIGRATIONS: string[] = [
     id TEXT PRIMARY KEY,
     job_type TEXT NOT NULL CHECK (job_type IN (
       'read_material','build_topics','make_chunks','link_and_weight',
-      'find_prerequisites','build_roadmap','build_lesson','make_practice','make_diagnostic')),
+      'find_prerequisites','build_roadmap','build_lesson','make_practice','make_diagnostic',
+      'extract_past_questions','generate_questions')),
     course_id TEXT REFERENCES courses(id) ON DELETE CASCADE,
     payload TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'queued'
@@ -191,4 +192,112 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (material_id, page_number),
     FOREIGN KEY (material_id) REFERENCES materials(id) ON DELETE CASCADE
   );`,
+  /* ---- Adaptive study (schema v2) ---- */
+  `CREATE TABLE IF NOT EXISTS course_study_settings (
+    course_id TEXT PRIMARY KEY REFERENCES courses(id) ON DELETE CASCADE,
+    profile TEXT NOT NULL DEFAULT 'adaptive'
+      CHECK (profile IN ('past_first','notes_first','adaptive')),
+    daily_minutes INTEGER NOT NULL DEFAULT 45
+      CHECK (daily_minutes BETWEEN 15 AND 240),
+    has_past_papers INTEGER NOT NULL DEFAULT 0,
+    plan_version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );`,
+  `CREATE TABLE IF NOT EXISTS exam_questions (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    material_id TEXT REFERENCES materials(id) ON DELETE SET NULL,
+    topic_id TEXT REFERENCES topics(id) ON DELETE SET NULL,
+    source TEXT NOT NULL CHECK (source IN ('past_paper','generated','user')),
+    prompt TEXT NOT NULL,
+    answer_md TEXT,
+    rubric_json TEXT,
+    year INTEGER,
+    paper_label TEXT,
+    question_number TEXT,
+    marks INTEGER,
+    question_type TEXT NOT NULL DEFAULT 'other'
+      CHECK (question_type IN
+        ('definition','explanation','derivation','numerical','comparison',
+         'diagram','essay','code','other')),
+    difficulty INTEGER NOT NULL DEFAULT 3 CHECK (difficulty BETWEEN 1 AND 5),
+    difficulty_source TEXT NOT NULL DEFAULT 'model'
+      CHECK (difficulty_source IN ('model','user','computed')),
+    pattern_key TEXT,
+    pattern_label TEXT,
+    citation_pages TEXT,
+    status TEXT NOT NULL DEFAULT 'draft'
+      CHECK (status IN ('draft','confirmed','rejected')),
+    prompt_version TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );`,
+  `CREATE INDEX IF NOT EXISTS exam_questions_course_idx
+    ON exam_questions (course_id, status, topic_id);`,
+  `CREATE TABLE IF NOT EXISTS exam_question_topics (
+    question_id TEXT NOT NULL REFERENCES exam_questions(id) ON DELETE CASCADE,
+    topic_id TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    confidence REAL,
+    PRIMARY KEY (question_id, topic_id)
+  );`,
+  `CREATE TABLE IF NOT EXISTS study_attempts (
+    id TEXT PRIMARY KEY,
+    course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    item_kind TEXT NOT NULL
+      CHECK (item_kind IN ('question','lesson','recall','mock')),
+    question_id TEXT REFERENCES exam_questions(id) ON DELETE SET NULL,
+    topic_id TEXT REFERENCES topics(id) ON DELETE SET NULL,
+    lesson_id TEXT REFERENCES lessons(id) ON DELETE SET NULL,
+    result TEXT CHECK (result IN ('correct','partial','wrong','skipped')),
+    score REAL,
+    max_score REAL,
+    confidence INTEGER CHECK (confidence BETWEEN 1 AND 3),
+    duration_seconds INTEGER,
+    meta TEXT,
+    started_at TEXT,
+    completed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );`,
+  `CREATE TABLE IF NOT EXISTS lesson_documents (
+    lesson_id TEXT PRIMARY KEY REFERENCES lessons(id) ON DELETE CASCADE,
+    structure_json TEXT NOT NULL,
+    beat_count INTEGER NOT NULL,
+    prompt_version TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );`,
+];
+
+/**
+ * Migration v2 rebuilds the job queue because SQLite cannot alter a CHECK
+ * constraint. Existing rows are copied, so a queued job survives the upgrade.
+ */
+export const JOB_TABLE_DDL = `CREATE TABLE IF NOT EXISTS jobs (
+    id TEXT PRIMARY KEY,
+    job_type TEXT NOT NULL CHECK (job_type IN (
+      'read_material','build_topics','make_chunks','link_and_weight',
+      'find_prerequisites','build_roadmap','build_lesson','make_practice','make_diagnostic',
+      'extract_past_questions','generate_questions')),
+    course_id TEXT REFERENCES courses(id) ON DELETE CASCADE,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued'
+      CHECK (status IN ('queued','running','done','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    run_after TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    locked_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+    finished_at TEXT
+  );`;
+
+export const REBUILD_JOBS_MIGRATION: string[] = [
+  `DROP TABLE IF EXISTS jobs_old;`,
+  `ALTER TABLE jobs RENAME TO jobs_old;`,
+  `DROP INDEX IF EXISTS jobs_queue_idx;`,
+  JOB_TABLE_DDL,
+  `INSERT INTO jobs (id, job_type, course_id, payload, status, attempts, max_attempts,
+     run_after, locked_at, last_error, created_at, finished_at)
+   SELECT id, job_type, course_id, payload, status, attempts, max_attempts,
+     run_after, locked_at, last_error, created_at, finished_at FROM jobs_old;`,
+  `DROP TABLE jobs_old;`,
+  `CREATE INDEX IF NOT EXISTS jobs_queue_idx ON jobs (status, run_after);`,
 ];

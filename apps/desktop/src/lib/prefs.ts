@@ -10,7 +10,17 @@ import { PREFS_STORAGE_KEY } from './prefs-storage';
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type StudyDepth = 'core' | 'bridge';
 export type PrefsLanguage = 'en' | 'bn' | 'mixed';
-export type CourseTab = 'material' | 'topics' | 'roadmap' | 'lessons' | 'tutor' | 'practice' | 'progress';
+export type StudyProfile = 'past_first' | 'notes_first' | 'adaptive';
+export type LessonFormat = 'board' | 'slides' | 'read';
+export type CourseTab =
+  | 'material'
+  | 'study'
+  | 'topics'
+  | 'roadmap'
+  | 'lessons'
+  | 'tutor'
+  | 'practice'
+  | 'progress';
 export type AccentName =
   | 'blue'
   | 'mauve'
@@ -49,6 +59,9 @@ export interface Prefs {
   defaultBridgeDepth: number;
   defaultLessonDepth: StudyDepth;
   defaultCourseTab: CourseTab;
+  defaultStudyProfile: StudyProfile;
+  defaultDailyMinutes: number;
+  lessonFormat: LessonFormat;
   /* Behaviour */
   showPercent: boolean;
   showCountdown: boolean;
@@ -76,6 +89,9 @@ export const DEFAULT_PREFS: Prefs = {
   defaultBridgeDepth: 2,
   defaultLessonDepth: 'core',
   defaultCourseTab: 'material',
+  defaultStudyProfile: 'adaptive',
+  defaultDailyMinutes: 45,
+  lessonFormat: 'board',
   showPercent: true,
   showCountdown: true,
   confirmDelete: true,
@@ -111,6 +127,7 @@ function sanitize(raw: unknown): Prefs {
       : DEFAULT_PREFS.language;
   const depth = Number(value.defaultBridgeDepth);
   const tab =
+    value.defaultCourseTab === 'study' ||
     value.defaultCourseTab === 'topics' ||
     value.defaultCourseTab === 'roadmap' ||
     value.defaultCourseTab === 'lessons' ||
@@ -120,6 +137,17 @@ function sanitize(raw: unknown): Prefs {
     value.defaultCourseTab === 'material'
       ? value.defaultCourseTab
       : DEFAULT_PREFS.defaultCourseTab;
+  const studyProfile: StudyProfile =
+    value.defaultStudyProfile === 'past_first' ||
+    value.defaultStudyProfile === 'notes_first' ||
+    value.defaultStudyProfile === 'adaptive'
+      ? value.defaultStudyProfile
+      : DEFAULT_PREFS.defaultStudyProfile;
+  const daily = Number(value.defaultDailyMinutes);
+  const lessonFormat: LessonFormat =
+    value.lessonFormat === 'board' || value.lessonFormat === 'slides' || value.lessonFormat === 'read'
+      ? value.lessonFormat
+      : DEFAULT_PREFS.lessonFormat;
   return {
     theme,
     accent,
@@ -132,6 +160,9 @@ function sanitize(raw: unknown): Prefs {
     defaultBridgeDepth: Number.isFinite(depth) ? Math.min(4, Math.max(0, Math.round(depth))) : 2,
     defaultLessonDepth: value.defaultLessonDepth === 'bridge' ? 'bridge' : 'core',
     defaultCourseTab: tab,
+    defaultStudyProfile: studyProfile,
+    defaultDailyMinutes: Number.isFinite(daily) ? Math.min(240, Math.max(15, Math.round(daily))) : 45,
+    lessonFormat,
     showPercent: bool(value.showPercent, DEFAULT_PREFS.showPercent),
     showCountdown: bool(value.showCountdown, DEFAULT_PREFS.showCountdown),
     confirmDelete: bool(value.confirmDelete, DEFAULT_PREFS.confirmDelete),

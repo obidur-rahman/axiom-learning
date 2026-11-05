@@ -3,3 +3,4 @@ export * from './weights';
 export * from './cycles';
 export * from './build';
 export * from './overrides';
+export * from './study-plan';

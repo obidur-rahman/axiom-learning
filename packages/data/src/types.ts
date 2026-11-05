@@ -111,3 +111,136 @@ export interface RoadmapRecord {
   version: number;
   roadmap: import('@axiom/engine').Roadmap;
 }
+
+/* ---------- Adaptive study ---------- */
+
+export type StudyProfile = 'past_first' | 'notes_first' | 'adaptive';
+export type QuestionSource = 'past_paper' | 'generated' | 'user';
+export type QuestionStatus = 'draft' | 'confirmed' | 'rejected';
+export type QuestionType =
+  | 'definition'
+  | 'explanation'
+  | 'derivation'
+  | 'numerical'
+  | 'comparison'
+  | 'diagram'
+  | 'essay'
+  | 'code'
+  | 'other';
+export type AttemptResult = 'correct' | 'partial' | 'wrong' | 'skipped';
+export type StudyItemKindDb = 'question' | 'lesson' | 'recall' | 'mock';
+
+export interface CourseStudySettings {
+  courseId: string;
+  profile: StudyProfile;
+  dailyMinutes: number;
+  hasPastPapers: boolean;
+  planVersion: number;
+  updatedAt: string;
+}
+
+export interface ExamQuestion {
+  id: string;
+  courseId: string;
+  materialId: string | null;
+  topicId: string | null;
+  topicIds: string[];
+  source: QuestionSource;
+  prompt: string;
+  answerMd: string | null;
+  rubric: unknown;
+  year: number | null;
+  paperLabel: string | null;
+  questionNumber: string | null;
+  marks: number | null;
+  questionType: QuestionType;
+  difficulty: number;
+  difficultySource: 'model' | 'user' | 'computed';
+  patternKey: string | null;
+  patternLabel: string | null;
+  citationPages: number[];
+  status: QuestionStatus;
+  promptVersion: string | null;
+  createdAt: string;
+}
+
+export interface ExamQuestionDraft {
+  id?: string;
+  courseId: string;
+  materialId?: string | null;
+  topicId?: string | null;
+  source: QuestionSource;
+  prompt: string;
+  answerMd?: string | null;
+  rubric?: unknown;
+  year?: number | null;
+  paperLabel?: string | null;
+  questionNumber?: string | null;
+  marks?: number | null;
+  questionType?: QuestionType;
+  difficulty?: number;
+  difficultySource?: 'model' | 'user' | 'computed';
+  patternKey?: string | null;
+  patternLabel?: string | null;
+  citationPages?: number[];
+  status?: QuestionStatus;
+  promptVersion?: string | null;
+}
+
+/* ---------- Teaching lesson documents ---------- */
+
+export type LessonBeatKind =
+  | 'hook'
+  | 'intuition'
+  | 'worked'
+  | 'contrast'
+  | 'note_anchor'
+  | 'recall'
+  | 'exam_shape';
+
+export type LessonBlock =
+  | { type: 'text'; text: string }
+  | { type: 'steps'; items: string[] }
+  | { type: 'compare'; columns: string[]; rows: string[][] }
+  | { type: 'equation'; latex: string; label?: string }
+  | { type: 'code'; language: string; code: string; trace?: string[] }
+  | { type: 'callout'; tone: 'trap' | 'tip' | 'note'; title?: string; text: string }
+  | { type: 'flow'; nodes: { id: string; label: string }[]; edges: { from: string; to: string; label?: string }[] }
+  | { type: 'recall'; prompt: string; answer: string };
+
+export interface LessonBeat {
+  title: string;
+  kind: LessonBeatKind;
+  intro: string;
+  blocks: LessonBlock[];
+  takeaway: string | null;
+  check: { prompt: string; answer: string } | null;
+  citationPages: number[];
+}
+
+export interface LessonDocument {
+  version: 2;
+  title: string;
+  objective: string;
+  beats: LessonBeat[];
+  checkQuestions: { prompt: string; answer: string }[];
+  citations: number[];
+  isGeneralContent: boolean;
+}
+
+export interface StudyAttempt {
+  id: string;
+  courseId: string;
+  itemKind: StudyItemKindDb;
+  questionId: string | null;
+  topicId: string | null;
+  lessonId: string | null;
+  result: AttemptResult | null;
+  score: number | null;
+  maxScore: number | null;
+  confidence: number | null;
+  durationSeconds: number | null;
+  meta: unknown;
+  startedAt: string | null;
+  completedAt: string;
+}

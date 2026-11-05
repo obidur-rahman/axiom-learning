@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { getCourse, type Course } from '@axiom/data';
 import { UploadPanel } from './upload-panel';
+import { StudyPanel } from './study-panel';
 import { TopicsPanel } from './topics-panel';
 import { RoadmapPanel } from './roadmap-panel';
 import { LessonsPanel } from './lessons-panel';
@@ -16,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
 const TABS: { kind: CourseTab; label: string; hint: string }[] = [
   { kind: 'material', label: 'Material', hint: 'Upload and read the syllabus, notes and past papers' },
+  { kind: 'study', label: 'Study', hint: 'Today’s plan, the question ladder and question coverage' },
   { kind: 'topics', label: 'Topics & scope', hint: 'Edit topics and what the exam covers' },
   { kind: 'roadmap', label: 'Roadmap', hint: 'The pruned dependency graph and study order' },
   { kind: 'lessons', label: 'Lessons', hint: 'Read a lesson with citations and check questions' },
@@ -128,6 +130,9 @@ function CourseTabs() {
         </TabsList>
         <TabsContent value="material" className="mt-3">
           <div className="card p-5"><UploadPanel courseId={courseId} /></div>
+        </TabsContent>
+        <TabsContent value="study" className="mt-3">
+          <div className="card p-4 sm:p-5"><StudyPanel courseId={courseId} examDate={course.examDate} /></div>
         </TabsContent>
         <TabsContent value="topics" className="mt-3">
           <div className="card p-5"><TopicsPanel courseId={courseId} /></div>

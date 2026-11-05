@@ -16,6 +16,7 @@ import {
 import { getDb, isDesktopRuntime } from '../lib/db';
 import { usePrefs } from '../lib/prefs';
 import { ProgressBar } from './progress-bar';
+import { TodayPlan } from './today-plan';
 
 type LoadState =
   | { kind: 'loading' }
@@ -120,6 +121,8 @@ export function Dashboard() {
   const nextExam = summaries
     .filter((entry) => entry.course.examDate !== null)
     .sort((a, b) => (a.course.examDate ?? '').localeCompare(b.course.examDate ?? ''))[0];
+  const focusCourse =
+    nextExam ?? summaries.filter((entry) => entry.topics > 0).sort((a, b) => b.finished - a.finished)[0];
   const today = new Date().toLocaleDateString(undefined, {
     weekday: 'long',
     month: 'long',
@@ -253,6 +256,14 @@ export function Dashboard() {
             />
           </section>
 
+          {focusCourse !== undefined && (
+            <TodayPlan
+              courseId={focusCourse.course.id}
+              courseTitle={focusCourse.course.title}
+              examDate={focusCourse.course.examDate}
+            />
+          )}
+
           <div className="grid gap-4 lg:grid-cols-[1.55fr_1fr]">
             <section className="card p-5" aria-labelledby="continue-heading">
               <div className="flex items-center justify-between gap-2">
@@ -288,7 +299,7 @@ export function Dashboard() {
                           </p>
                         </div>
                         <Link
-                          href={`/course?id=${entry.course.id}${entry.nextTopicId === null ? '' : '&tab=lessons'}`}
+                          href={`/course?id=${entry.course.id}&tab=study`}
                           className="btn btn-ghost btn-sm shrink-0"
                         >
                           {entry.planned === 0 ? 'Add material' : 'Resume'}
