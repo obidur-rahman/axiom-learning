@@ -23,7 +23,7 @@ export function Toggle({ id, label, description, checked, onCheckedChange }: Tog
       <Switch
         id={id}
         checked={checked}
-        onCheckedChange={(next) => onCheckedChange(next)}
+        onCheckedChange={onCheckedChange}
         className="mt-0.5"
       />
     </div>

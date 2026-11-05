@@ -27,37 +27,35 @@ const STATUSES: { value: ProgressStatus; label: string }[] = [
   { value: 'known', label: 'Known' },
 ];
 
-function loadPlan(db: DbDriver, courseId: string, includeSkipped: boolean): Promise<PlanRow[]> {
-  return (async () => {
-    const nodes = await db.select<Record<string, unknown>>(
-      `SELECT n.topic_id, n.node_type, n.order_index, COALESCE(t.title, n.topic_id) AS title
-       FROM roadmap_nodes n
-       JOIN roadmap_versions r ON r.id = n.roadmap_version_id
-       LEFT JOIN topics t ON t.id = n.topic_id
-       WHERE r.course_id = $1
-         AND r.version = (SELECT MAX(version) FROM roadmap_versions WHERE course_id = $1)
-       ORDER BY COALESCE(n.order_index, 999999)`,
-      [courseId],
-    );
-    const progress = new Map((await listProgress(db, courseId)).map((row) => [row.topicId, row.status]));
-    const seen = new Set<string>();
-    const rows: PlanRow[] = [];
-    for (const node of nodes) {
-      const id = String(node['topic_id']);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      const nodeType = String(node['node_type'] ?? 'core');
-      const status = progress.get(id) ?? 'not_started';
-      if (nodeType === 'skipped' && status === 'not_started' && !includeSkipped) continue;
-      rows.push({
-        id,
-        title: String(node['title'] ?? id),
-        status,
-        inOrder: nodeType === 'core' || nodeType === 'bridge',
-      });
-    }
-    return rows;
-  })();
+async function loadPlan(db: DbDriver, courseId: string, includeSkipped: boolean): Promise<PlanRow[]> {
+  const nodes = await db.select<Record<string, unknown>>(
+    `SELECT n.topic_id, n.node_type, n.order_index, COALESCE(t.title, n.topic_id) AS title
+     FROM roadmap_nodes n
+     JOIN roadmap_versions r ON r.id = n.roadmap_version_id
+     LEFT JOIN topics t ON t.id = n.topic_id
+     WHERE r.course_id = $1
+       AND r.version = (SELECT MAX(version) FROM roadmap_versions WHERE course_id = $1)
+     ORDER BY COALESCE(n.order_index, 999999)`,
+    [courseId],
+  );
+  const progress = new Map((await listProgress(db, courseId)).map((row) => [row.topicId, row.status]));
+  const seen = new Set<string>();
+  const rows: PlanRow[] = [];
+  for (const node of nodes) {
+    const id = String(node['topic_id']);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const nodeType = String(node['node_type'] ?? 'core');
+    const status = progress.get(id) ?? 'not_started';
+    if (nodeType === 'skipped' && status === 'not_started' && !includeSkipped) continue;
+    rows.push({
+      id,
+      title: String(node['title'] ?? id),
+      status,
+      inOrder: nodeType === 'core' || nodeType === 'bridge',
+    });
+  }
+  return rows;
 }
 
 /**

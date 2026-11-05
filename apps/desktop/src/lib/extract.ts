@@ -186,22 +186,12 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 /** Composed extractor set used by the read step in the app worker. */
-export function makeAppExtractors(config: () => Promise<ProviderConfigInput | null>): PageExtractors {
+export function makeAppExtractors(): PageExtractors {
   return {
-    async extractPdf(data) {
-      const textLayer = await extractPdfTextLayer(data);
-      const missing = textLayer.every((page) => page.text === null);
-      if (!missing) return textLayer;
-      // Scanned PDF without text layer: OCR page by page (bounded effort).
-      const pages: ExtractedPage[] = [];
-      for (const fallback of textLayer) {
-        pages.push({ ...fallback, text: null });
-      }
-      return pages;
-    },
+    // A scanned PDF comes back with every page textless; the read step OCRs it.
+    extractPdf: extractPdfTextLayer,
     extractImage: (data, mime) => extractOcr(data, mime),
     extractText: (text) => ({ pageNumber: 1, text: text.trim() === '' ? null : text.trim(), method: 'pasted', confidence: 1 }),
   };
 }
 
-export const DESKTOP_EXTRACTOR_NOTE = 'vision read is page-level: see makeVisionReader';

@@ -2,20 +2,9 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  buildStudyPlan,
-  type PlanAttempt,
-  type PlanQuestion,
-  type PlanTopic,
-  type StudyItem,
-} from '@axiom/engine';
+import { buildStudyPlan, type StudyItem } from '@axiom/engine';
 import {
   enqueue,
-  ensureStudySettings,
-  listAttempts,
-  listProgress,
-  listQuestions,
-  loadLatestRoadmap,
   saveAttempt,
   saveStudySettings,
   type CourseStudySettings,
@@ -25,6 +14,7 @@ import {
 import { BookOpen, CheckCircle2, CircleHelp, ListChecks, RefreshCw, XCircle } from 'lucide-react';
 import { getDb } from '../lib/db';
 import { onAppEvent } from '../lib/events';
+import { loadStudyPlan } from '../lib/study-plan';
 import { MockExam } from './mock-exam';
 import { QuestionReview } from './question-review';
 
@@ -73,81 +63,13 @@ export function StudyPanel({ courseId, examDate }: { courseId: string; examDate:
 
   const load = useCallback(async () => {
     const db = await getDb();
-    const [settings, questions, roadmap, progress, attempts, lessons, materialRows] = await Promise.all([
-      ensureStudySettings(db.driver, courseId),
-      listQuestions(db.driver, courseId),
-      loadLatestRoadmap(db.driver, courseId),
-      listProgress(db.driver, courseId),
-      listAttempts(db.driver, courseId),
-      db.driver.select<{ topic_id: string | null; id: string }>(
-        `SELECT topic_id, id FROM lessons
-         WHERE course_id = $1 AND status = 'active' AND language = 'mixed'
-         ORDER BY CASE depth WHEN 'core' THEN 0 ELSE 1 END, created_at DESC`,
-        [courseId],
-      ),
+    const [{ settings, plan, questions, topics }, materialRows] = await Promise.all([
+      loadStudyPlan(db.driver, courseId, examDate),
       db.driver.select<{ kind: string; c: number }>(
         'SELECT kind, COUNT(*) AS c FROM materials WHERE course_id = $1 GROUP BY kind',
         [courseId],
       ),
     ]);
-
-    const activeLesson = new Map<string, string>();
-    for (const row of lessons) {
-      if (row.topic_id !== null && !activeLesson.has(row.topic_id)) activeLesson.set(row.topic_id, row.id);
-    }
-    const progressMap = new Map(progress.map((row) => [row.topicId, row.status]));
-    const nodeByTopic = new Map(roadmap?.roadmap.nodes.map((node) => [node.id, node]) ?? []);
-
-    const topicRows = await db.driver.select<{ id: string; title: string; syllabus_order: number | null }>(
-      'SELECT id, title, syllabus_order FROM topics WHERE course_id = $1 ORDER BY COALESCE(syllabus_order, 999999), created_at',
-      [courseId],
-    );
-
-    const topics: PlanTopic[] = topicRows.map((row, index) => {
-      const node = nodeByTopic.get(row.id);
-      const status = progressMap.get(row.id) ?? 'not_started';
-      return {
-        id: row.id,
-        title: row.title,
-        weight: node?.weight ?? 0.05,
-        order: node?.order ?? row.syllabus_order ?? index,
-        type: node?.type ?? 'core',
-        progress:
-          status === 'known' ? 'known' : status === 'done' ? 'done' : status === 'in_progress' ? 'in_progress' : 'not_started',
-        lessonId: activeLesson.get(row.id) ?? null,
-      };
-    });
-
-    const planQuestions: PlanQuestion[] = questions
-      .filter((question) => question.status === 'confirmed')
-      .map((question) => ({
-        id: question.id,
-        topicIds: question.topicIds.length > 0 ? question.topicIds : question.topicId === null ? [] : [question.topicId],
-        source: question.source,
-        difficulty: question.difficulty,
-        year: question.year,
-        marks: question.marks,
-        status: question.status,
-      }));
-
-    const planAttempts: PlanAttempt[] = attempts.map((row) => ({
-      questionId: row.questionId,
-      topicId: row.topicId,
-      itemKind: row.itemKind,
-      result: row.result,
-      score: row.score,
-      completedAt: row.completedAt,
-    }));
-
-    const plan = buildStudyPlan({
-      profile: settings.profile,
-      dailyMinutes: settings.dailyMinutes,
-      examDate,
-      topics,
-      questions: planQuestions,
-      attempts: planAttempts,
-      now: new Date().toISOString(),
-    });
 
     const materialCount = (kind: string) =>
       materialRows.filter((row) => row.kind === kind).reduce((total, row) => total + Number(row.c), 0);
@@ -156,8 +78,8 @@ export function StudyPanel({ courseId, examDate }: { courseId: string; examDate:
       settings,
       plan,
       questions,
-      topicTitles: Object.fromEntries(topicRows.map((row) => [row.id, row.title])),
-      firstTopicId: topicRows[0]?.id ?? null,
+      topicTitles: Object.fromEntries(topics.map((row) => [row.id, row.title])),
+      firstTopicId: topics[0]?.id ?? null,
       pastMaterialCount: materialCount('past_questions'),
       noteMaterialCount: materialCount('notes') + materialCount('syllabus') + materialCount('textbook'),
     });

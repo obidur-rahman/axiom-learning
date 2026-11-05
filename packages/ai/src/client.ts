@@ -178,7 +178,6 @@ export function parseLenientJson(text: string): unknown {
  * the pipeline uses, falls back to the type name.
  */
 function zodShapeHint(schema: ZodType): unknown {
-  const desc = (schema as unknown as { description?: string }).description;
   const def = (schema as unknown as { _def?: { typeName?: string } })._def;
   const inner = schema as unknown as {
     shape?: Record<string, ZodType>;

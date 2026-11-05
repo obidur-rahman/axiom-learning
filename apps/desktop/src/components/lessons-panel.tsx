@@ -7,7 +7,6 @@ import {
   flagLesson,
   getActiveLesson,
   getLessonDocument,
-  type DbDriver,
   type Lesson,
   type LessonDocument,
 } from '@axiom/data';
@@ -16,38 +15,13 @@ import { getDb } from '../lib/db';
 import { onAppEvent } from '../lib/events';
 import { parseLessonContent } from '../lib/lesson-content';
 import { loadPrefs, usePrefs } from '../lib/prefs';
+import { listTopicOptions, type TopicOption } from '../lib/topics';
 import { LessonBoard } from './lesson-board';
 import { LessonDeck } from './lesson-deck';
 import { Markdown } from './markdown';
 import { ProgressBar } from './progress-bar';
 
 /** One topic option in the lesson picker. */
-interface TopicOption {
-  id: string;
-  title: string;
-  nodeType: string;
-}
-
-function listTopics(db: DbDriver, courseId: string): Promise<TopicOption[]> {
-  return (async () => {
-    const rows = await db.select<Record<string, unknown>>(
-      `SELECT t.id, t.title, COALESCE(n.node_type, 'core') AS node_type
-       FROM topics t
-       LEFT JOIN roadmap_nodes n
-         ON n.topic_id = t.id
-         AND n.roadmap_version_id = (SELECT id FROM roadmap_versions WHERE course_id = $1 ORDER BY version DESC LIMIT 1)
-       WHERE t.course_id = $1 AND COALESCE(n.node_type, 'core') <> 'skipped'
-       ORDER BY COALESCE(n.order_index, 999999), t.created_at`,
-      [courseId],
-    );
-    return rows.map((row) => ({
-      id: String(row['id']),
-      title: String(row['title']),
-      nodeType: String(row['node_type']),
-    }));
-  })();
-}
-
 /**
  * Lessons + diagnostic (FR-040..FR-057): one topic at a time. A saved lesson
  * becomes a designed slide deck with a key-idea footer, a final check-yourself
@@ -83,7 +57,7 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
       const initialDepth = loadPrefs().defaultLessonDepth;
       setDepth(initialDepth);
       const db = await getDb();
-      const options = await listTopics(db.driver, courseId);
+      const options = await listTopicOptions(db.driver, courseId);
       setTopics(options);
       const first =
         (requestedTopic !== null && options.some((topic) => topic.id === requestedTopic)

@@ -225,14 +225,6 @@ export function LessonBoard({
             </p>
           </div>
         )}
-        <button
-          type="button"
-          className="btn btn-primary btn-sm mt-auto"
-          onClick={() => setPresent(true)}
-        >
-          <Maximize2 className="size-4" aria-hidden />
-          Present
-        </button>
       </aside>
 
       <div className="flex min-w-0 flex-col">

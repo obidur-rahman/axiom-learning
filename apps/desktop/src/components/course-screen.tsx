@@ -12,7 +12,7 @@ import { TutorPanel } from './tutor-panel';
 import { PracticePanel } from './practice-panel';
 import { ProgressPanel } from './progress-panel';
 import { getDb } from '../lib/db';
-import { loadPrefs, type CourseTab } from '../lib/prefs';
+import { languageLabel, loadPrefs, type CourseTab } from '../lib/prefs';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
 const TABS: { kind: CourseTab; label: string; hint: string }[] = [
@@ -119,7 +119,7 @@ function CourseTabs() {
         <p className="mt-2 flex flex-wrap items-center gap-1">
           <span className="chip">{course.level}</span>
           <span className="chip">
-            {course.language === 'mixed' ? 'Bangla + English' : course.language === 'bn' ? 'Bangla' : 'English'}
+            {languageLabel(course.language)}
           </span>
           <span className="chip">{course.status}</span>
           {course.examDate !== null && (

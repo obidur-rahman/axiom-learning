@@ -254,6 +254,10 @@ export function watchSystemTheme(): () => void {
   return () => media.removeEventListener('change', onChange);
 }
 
+export function languageLabel(language: string): string {
+  return language === 'mixed' ? 'Bangla + English' : language === 'bn' ? 'Bangla' : 'English';
+}
+
 export function initialsOf(name: string): string {
   const trimmed = name.trim();
   if (trimmed === '') return 'AL';

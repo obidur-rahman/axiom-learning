@@ -2,15 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { buildStudyPlan, type PlanAttempt, type PlanQuestion, type PlanTopic, type StudyItem } from '@axiom/engine';
-import {
-  ensureStudySettings,
-  listAttempts,
-  listProgress,
-  listQuestions,
-  loadLatestRoadmap,
-} from '@axiom/data';
+import type { StudyItem } from '@axiom/engine';
 import { getDb } from '../lib/db';
+import { loadStudyPlan } from '../lib/study-plan';
 
 /**
  * The dashboard's "today" card: the next three deterministic study items for
@@ -32,70 +26,8 @@ export function TodayPlan({
     let cancelled = false;
     void (async () => {
       const db = await getDb();
-      const [settings, questions, roadmap, progress, attempts, lessons, topics] = await Promise.all([
-        ensureStudySettings(db.driver, courseId),
-        listQuestions(db.driver, courseId),
-        loadLatestRoadmap(db.driver, courseId),
-        listProgress(db.driver, courseId),
-        listAttempts(db.driver, courseId),
-        db.driver.select<{ topic_id: string | null; id: string }>(
-          "SELECT topic_id, id FROM lessons WHERE course_id = $1 AND status = 'active' AND language = 'mixed' ORDER BY created_at DESC",
-          [courseId],
-        ),
-        db.driver.select<{ id: string; title: string; syllabus_order: number | null }>(
-          'SELECT id, title, syllabus_order FROM topics WHERE course_id = $1 ORDER BY COALESCE(syllabus_order, 999999)',
-          [courseId],
-        ),
-      ]);
+      const { plan } = await loadStudyPlan(db.driver, courseId, examDate);
       if (cancelled) return;
-      const activeLessons = new Map<string, string>();
-      for (const row of lessons) {
-        if (row.topic_id !== null && !activeLessons.has(row.topic_id)) activeLessons.set(row.topic_id, row.id);
-      }
-      const progressMap = new Map(progress.map((row) => [row.topicId, row.status]));
-      const nodeByTopic = new Map(roadmap?.roadmap.nodes.map((node) => [node.id, node]) ?? []);
-      const planTopics: PlanTopic[] = topics.map((topic, index) => {
-        const node = nodeByTopic.get(topic.id);
-        const status = progressMap.get(topic.id) ?? 'not_started';
-        return {
-          id: topic.id,
-          title: topic.title,
-          weight: node?.weight ?? 0.05,
-          order: node?.order ?? topic.syllabus_order ?? index,
-          type: node?.type ?? 'core',
-          progress:
-            status === 'known' ? 'known' : status === 'done' ? 'done' : status === 'in_progress' ? 'in_progress' : 'not_started',
-          lessonId: activeLessons.get(topic.id) ?? null,
-        };
-      });
-      const planQuestions: PlanQuestion[] = questions
-        .filter((question) => question.status === 'confirmed')
-        .map((question) => ({
-          id: question.id,
-          topicIds: question.topicIds.length > 0 ? question.topicIds : question.topicId === null ? [] : [question.topicId],
-          source: question.source,
-          difficulty: question.difficulty,
-          year: question.year,
-          marks: question.marks,
-          status: question.status,
-        }));
-      const planAttempts: PlanAttempt[] = attempts.map((row) => ({
-        questionId: row.questionId,
-        topicId: row.topicId,
-        itemKind: row.itemKind,
-        result: row.result,
-        score: row.score,
-        completedAt: row.completedAt,
-      }));
-      const plan = buildStudyPlan({
-        profile: settings.profile,
-        dailyMinutes: settings.dailyMinutes,
-        examDate,
-        topics: planTopics,
-        questions: planQuestions,
-        attempts: planAttempts,
-        now: new Date().toISOString(),
-      });
       setItems(plan.items.slice(0, 3));
       setDays(plan.daysUntilExam);
     })().catch(() => setItems([]));

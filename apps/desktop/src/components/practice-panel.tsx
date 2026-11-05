@@ -8,27 +8,12 @@ import {
   type WrittenItem,
   type WrittenScore,
 } from '@axiom/pipeline';
-import { setProgress, type DbDriver } from '@axiom/data';
+import { setProgress } from '@axiom/data';
 import { getDb } from '../lib/db';
 import { loadConfig } from '../lib/provider';
+import { listTopicOptions, type TopicOption } from '../lib/topics';
 import { usePrefs } from '../lib/prefs';
 import { Markdown } from './markdown';
-
-function listTopics(db: DbDriver, courseId: string): Promise<{ id: string; title: string }[]> {
-  return (async () => {
-    const rows = await db.select<Record<string, unknown>>(
-      `SELECT t.id, t.title, COALESCE(n.node_type, 'core') AS node_type
-       FROM topics t
-       LEFT JOIN roadmap_nodes n
-         ON n.topic_id = t.id
-         AND n.roadmap_version_id = (SELECT id FROM roadmap_versions WHERE course_id = $1 ORDER BY version DESC LIMIT 1)
-       WHERE t.course_id = $1 AND COALESCE(n.node_type, 'core') <> 'skipped'
-       ORDER BY COALESCE(n.order_index, 999999), t.created_at`,
-      [courseId],
-    );
-    return rows.map((row) => ({ id: String(row['id']), title: String(row['title']) }));
-  })();
-}
 
 /**
  * Practice screen (FR-064..FR-069): a set of multiple-choice questions that
@@ -38,7 +23,7 @@ function listTopics(db: DbDriver, courseId: string): Promise<{ id: string; title
  */
 export function PracticePanel({ courseId }: { courseId: string }) {
   const prefs = usePrefs();
-  const [topics, setTopics] = useState<{ id: string; title: string }[]>([]);
+  const [topics, setTopics] = useState<TopicOption[]>([]);
   const [autoKnownNote, setAutoKnownNote] = useState('');
   const [topicId, setTopicId] = useState('');
   const [loading, setLoading] = useState(false);
@@ -53,7 +38,7 @@ export function PracticePanel({ courseId }: { courseId: string }) {
   useEffect(() => {
     void (async () => {
       const db = await getDb();
-      const options = await listTopics(db.driver, courseId);
+      const options = await listTopicOptions(db.driver, courseId);
       setTopics(options);
       setTopicId(options[0]?.id ?? '');
     })();

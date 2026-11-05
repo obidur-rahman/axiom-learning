@@ -14,7 +14,7 @@ import {
   type RecentMaterial,
 } from '@axiom/data';
 import { getDb, isDesktopRuntime } from '../lib/db';
-import { usePrefs } from '../lib/prefs';
+import { languageLabel, usePrefs } from '../lib/prefs';
 import { ProgressBar } from './progress-bar';
 import { TodayPlan } from './today-plan';
 
@@ -291,7 +291,7 @@ export function Dashboard() {
                           <p className="mt-1.5 flex flex-wrap items-center gap-1">
                             <span className="chip">{entry.course.level}</span>
                             <span className="chip">
-                              {entry.course.language === 'mixed' ? 'Bangla + English' : entry.course.language === 'bn' ? 'Bangla' : 'English'}
+                              {languageLabel(entry.course.language)}
                             </span>
                             {entry.course.examDate !== null && (
                               <span className="chip">Exam {examText(entry.course.examDate, prefs.showCountdown)}</span>

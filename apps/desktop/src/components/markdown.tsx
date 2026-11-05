@@ -112,7 +112,7 @@ export function Markdown({ content, className, compact = false, inline = false }
  *   over two lines$ -> $$ ... $$ (single dollars cannot span lines)
  * Emphasis that leaked inside math is dropped so KaTeX gets clean source.
  */
-export function normalizeMathDelimiters(markdown: string): string {
+function normalizeMathDelimiters(markdown: string): string {
   return markdown
     .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g)
     .map((part, index) => {
@@ -147,7 +147,7 @@ function cleanMathPart(part: string): string {
   });
 
   // `**x**` inside math is Markdown emphasis that leaked into LaTeX.
-  text = text.replace(/\$\$([\s\S]*?)\$\$|\$([^$\n]+?)\$/g, (match, display?: string, inline?: string) => {
+  text = text.replace(/\$\$([\s\S]*?)\$\$|\$([^$\n]+?)\$/g, (_match, display?: string, inline?: string) => {
     const body = (display ?? inline ?? '').replace(/\*\*/g, '');
     return display !== undefined ? `$$${body}$$` : `$${body}$`;
   });

@@ -87,7 +87,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
     async (files: FileList | null) => {
       if (files === null || files.length === 0) return;
       const db = await getDb();
-      const extractors = makeAppExtractors(loadConfig);
+      const extractors = makeAppExtractors();
       for (const file of Array.from(files)) {
         // Files stay on this machine. Let the local reader handle the size
         // instead of rejecting a PDF before it has tried to read it.
