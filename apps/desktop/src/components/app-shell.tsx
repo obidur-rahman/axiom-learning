@@ -9,10 +9,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { getProviderSettings } from '@axiom/data';
+import {
+  getProviderSettings,
+  listCourses,
+} from '@axiom/data';
 import { getDb, isDesktopRuntime } from '../lib/db';
 import { initialsOf, savePrefs, usePrefs, type ThemeMode } from '../lib/prefs';
 import { JobIndicator } from './job-indicator';
+import { NotificationCenter } from './notification-center';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 
 interface NavEntry {
@@ -50,7 +54,10 @@ const NAV: NavEntry[] = [
   {
     href: '/courses',
     label: 'Courses',
-    match: (pathname) => pathname.startsWith('/courses') || pathname.startsWith('/course'),
+    match: (pathname) =>
+      pathname.startsWith('/courses') ||
+      pathname.startsWith('/course') ||
+      pathname.startsWith('/preview'),
     icon: (
       <svg {...iconProps}>
         <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15.5H6.5A2.5 2.5 0 0 0 4 21z" />
@@ -194,6 +201,20 @@ function SidebarBody() {
   const pathname = usePathname() ?? '/';
   const prefs = usePrefs();
   const name = prefs.displayName.trim();
+  const [courseCount, setCourseCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isDesktopRuntime()) return;
+    void (async () => {
+      try {
+        const db = await getDb();
+        const courses = await listCourses(db.driver);
+        setCourseCount(courses.length);
+      } catch {
+        setCourseCount(null);
+      }
+    })();
+  }, []);
 
   return (
     <>
@@ -217,19 +238,55 @@ function SidebarBody() {
         </span>
       </Link>
 
-      <nav aria-label="Main" className="mt-7 flex flex-col gap-1">
+      {/* Profile, notifications and theme sit at the top of the rail. */}
+      <div className="mt-5 rounded-[var(--radius)] border border-border bg-rail-soft p-1.5">
+        <div className="flex items-center gap-1">
+          <Link
+            href="/settings#profile"
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[calc(var(--radius)-2px)] px-1.5 py-1.5 no-underline transition-colors duration-150 hover:bg-rail-active"
+            title="Edit your local profile"
+          >
+            <span
+              aria-hidden
+              className="flex size-8 flex-none items-center justify-center rounded-full border border-border bg-accent-soft text-[10.5px] font-semibold text-accent"
+              style={{ borderColor: 'color-mix(in srgb, var(--color-accent) 40%, transparent)' }}
+            >
+              {initialsOf(name)}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-[12.5px] font-medium text-rail-text">
+                {name === '' ? 'Local learner' : name}
+              </span>
+              <span className="block truncate text-[10.5px] text-rail-icon">On this device</span>
+            </span>
+          </Link>
+          <NotificationCenter />
+          <ThemeButton />
+        </div>
+      </div>
+
+      <nav aria-label="Main" className="mt-6 flex flex-col gap-1">
         <p className="px-2.5 pb-1 text-[10px] font-medium uppercase tracking-[0.18em] text-rail-icon/75">
           Workspace
         </p>
         {NAV.map((entry) => {
           const active = entry.match(pathname);
           return (
-            <RailTooltip key={entry.href} label={entry.label} side="right">
-              <Link href={entry.href} aria-current={active ? 'page' : undefined} className="nav-item">
-                {entry.icon}
-                <span className="truncate">{entry.label}</span>
-              </Link>
-            </RailTooltip>
+            <Link
+              key={entry.href}
+              href={entry.href}
+              aria-current={active ? 'page' : undefined}
+              className={`nav-item ${active ? 'aria-current=page' : ''}`}
+              style={active ? { background: 'var(--color-accent-soft)', color: 'var(--color-rail-text)' } : undefined}
+            >
+              {entry.icon}
+              <span className="truncate">{entry.label}</span>
+              {entry.href === '/courses' && courseCount !== null && courseCount > 0 && (
+                <span className="ml-auto shrink-0 rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  {courseCount}
+                </span>
+              )}
+            </Link>
           );
         })}
       </nav>
@@ -237,31 +294,6 @@ function SidebarBody() {
       <div className="mt-auto flex flex-col gap-2.5 pt-5">
         <JobIndicator />
         <ProviderStatus />
-
-        <div className="mt-1 rounded-[var(--radius)] border border-border bg-rail-soft p-1.5">
-          <div className="flex items-center gap-1">
-            <Link
-              href="/settings#profile"
-              className="flex min-w-0 flex-1 items-center gap-2.5 rounded-[calc(var(--radius)-2px)] px-1.5 py-1.5 no-underline transition-colors duration-150 hover:bg-rail-active"
-              title="Edit your local profile"
-            >
-              <span
-                aria-hidden
-                className="flex size-8 flex-none items-center justify-center rounded-full border border-border bg-accent-soft text-[10.5px] font-semibold text-accent"
-                style={{ borderColor: 'color-mix(in srgb, var(--color-accent) 40%, transparent)' }}
-              >
-                {initialsOf(name)}
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-[12.5px] font-medium text-rail-text">
-                  {name === '' ? 'Local learner' : name}
-                </span>
-                <span className="block truncate text-[10.5px] text-rail-icon">On this device</span>
-              </span>
-            </Link>
-            <ThemeButton />
-          </div>
-        </div>
       </div>
     </>
   );
@@ -301,6 +333,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             ))}
           </nav>
+          <JobIndicator />
+          <NotificationCenter />
           <ThemeButton />
         </header>
 

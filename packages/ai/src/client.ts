@@ -178,7 +178,7 @@ export function parseLenientJson(text: string): unknown {
  * the pipeline uses, falls back to the type name.
  */
 function zodShapeHint(schema: ZodType): unknown {
-  const def = (schema as unknown as { _def?: { typeName?: string } })._def;
+  const def = (schema as unknown as { _def?: { typeName?: string; in?: ZodType; out?: ZodType } })._def;
   const inner = schema as unknown as {
     shape?: Record<string, ZodType>;
     element?: ZodType;
@@ -191,6 +191,9 @@ function zodShapeHint(schema: ZodType): unknown {
     return out;
   }
   if (inner.element) return [zodShapeHint(inner.element)];
+  // z.preprocess() wraps the real schema in a pipe. Follow the output side so
+  // the model is shown the object shape instead of a bare "pipe".
+  if (def?.out !== undefined) return zodShapeHint(def.out);
   return def?.typeName ?? 'unknown';
 }
 

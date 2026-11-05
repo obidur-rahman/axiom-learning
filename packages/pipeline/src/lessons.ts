@@ -6,10 +6,12 @@ import { boundedModelTask, type RunContext } from './steps';
 import { z } from 'zod';
 
 const LessonSchema = z.object({
+  // The deck scales with the topic (prompt: 3-4 short topics, 10-14 deep
+  // ones); the cap only guards against a runaway response.
   sections: z
     .array(z.object({ title: z.string(), markdown: z.string() }))
     .min(1)
-    .max(12),
+    .max(16),
   citations: z.array(z.object({ page: z.number().int().min(1) })).max(200),
   checkQuestions: z
     .array(z.object({ prompt: z.string(), answer: z.string() }))

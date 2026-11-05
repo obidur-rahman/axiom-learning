@@ -14,6 +14,7 @@ import { loadConfig } from '../lib/provider';
 import { listTopicOptions, type TopicOption } from '../lib/topics';
 import { usePrefs } from '../lib/prefs';
 import { Markdown } from './markdown';
+import { ProgressBar } from './progress-bar';
 
 /**
  * Practice screen (FR-064..FR-069): a set of multiple-choice questions that
@@ -144,12 +145,11 @@ export function PracticePanel({ courseId }: { courseId: string }) {
 
       {loading && (
         <div className="rounded-[var(--radius)] border border-border bg-surface p-4" aria-live="polite">
-          <p className="text-sm text-text-muted">Writing a set of questions that covers the whole topic...</p>
-          <div className="mt-2">
-            <div className="deck-progress-track" role="progressbar" aria-label="Building practice set">
-              <div className="deck-progress-fill animate-pulse" style={{ width: '45%' }} />
-            </div>
-          </div>
+          <p className="flex items-center gap-2 text-sm text-text-muted">
+            <span aria-hidden className="spinner" />
+            Writing a set of questions that covers the whole topic...
+          </p>
+          <ProgressBar className="mt-2" label="Building practice set" indeterminate />
         </div>
       )}
 

@@ -39,11 +39,19 @@ function SettingsSection({
 }) {
   return (
     <section id={id} className="card anchor-target p-5" aria-labelledby={`${id}-heading`}>
-      <h2 id={`${id}-heading`} className="text-[16.5px] font-semibold tracking-tight">
-        {title}
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 id={`${id}-heading`} className="text-[16.5px] font-semibold tracking-tight">
+          {title}
+        </h2>
+        <a
+          href={`#${id}`}
+          className="hidden text-[11px] text-accent underline-offset-4 hover:underline lg:inline"
+        >
+          Link
+        </a>
+      </div>
       <p className="mt-1 text-[13px] leading-relaxed text-text-muted">{description}</p>
-      <div className="mt-4">{children}</div>
+      <div className="mt-4 flex flex-col gap-3">{children}</div>
     </section>
   );
 }

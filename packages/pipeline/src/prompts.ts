@@ -39,9 +39,14 @@ You write a study lesson for one topic. Reply with JSON only:
 "checkQuestions":[{"prompt":"...","answer":"..."}]}
 Rules: ground every claim in the given material and add the page number of the
 supporting page to citations (the checked part).
-Make the lesson a slide deck, not an essay. Use 4 to 8 sections. Each section
-is one slide and teaches one idea in 35 to 90 words. A section must be easy to
-scan: a short paragraph, a short list or a table, not a wall of text.
+Make the lesson a slide deck, not an essay. The number of sections must match
+the topic: a single definition can be 3 or 4 sections, while a topic with
+sub-sections, several formulas, a derivation or a multi-step process needs 10
+to 14 sections - one idea per slide, never two ideas on one slide. Do not pad
+a short topic and do not compress a long one. Each section teaches one idea in
+35 to 90 words and must be easy to scan: a short paragraph, a short list or a
+table, not a wall of text. Every formula gets its own display equation line,
+and a worked example is split over steps rather than written as prose.
 Every section starts with one key idea as a blockquote: > **Key idea:** ...
 Then use the shape that fits the content: a numbered list for a process or
 sequence, a compact table with a header row for comparisons, a fenced code

@@ -68,6 +68,44 @@ export async function createMaterial(db: DbDriver, draft: MaterialDraft): Promis
   return material;
 }
 
+/**
+ * Base64-encodes bytes in chunks: spreading a whole file's bytes into
+ * String.fromCharCode overflows the call stack for anything more than a few
+ * KB, so each chunk is converted separately and appended.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunk = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
+  }
+  return btoa(binary);
+}
+
+/** Store the raw file bytes for preview rendering (base64 in a TEXT column). */
+export async function storeFileData(db: DbDriver, materialId: string, data: ArrayBuffer, mime: string): Promise<void> {
+  const b64 = bytesToBase64(new Uint8Array(data));
+  await db.execute(
+    `UPDATE materials SET file_path = $1, mime_type = $2, size_bytes = $3 WHERE id = $4`,
+    [b64, mime, data.byteLength, materialId],
+  );
+}
+
+/** Read the stored file bytes back out for preview rendering. */
+export async function getFileData(db: DbDriver, materialId: string): Promise<{ data: ArrayBuffer; mime: string } | null> {
+  const rows = await db.select<Record<string, unknown>>(
+    `SELECT file_path, mime_type FROM materials WHERE id = $1`,
+    [materialId],
+  );
+  const row = rows[0];
+  if (!row || !row.file_path) return null;
+  const b64 = String(row.file_path);
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return { data: bytes.buffer as ArrayBuffer, mime: String(row.mime_type ?? 'application/pdf') };
+}
+
 export async function listMaterials(db: DbDriver, courseId: string): Promise<Material[]> {
   const rows = await db.select(
     'SELECT * FROM materials WHERE course_id = $1 ORDER BY created_at',

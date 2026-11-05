@@ -1,0 +1,6 @@
+export { Progress } from './progress'
+export { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select'
+export { Slider } from './slider'
+export { Switch } from './switch'
+export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants } from './tabs'
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from './tooltip'

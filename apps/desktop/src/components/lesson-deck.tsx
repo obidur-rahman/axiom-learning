@@ -9,9 +9,11 @@ import {
   Pause,
   Play,
   Sparkles,
+  Square,
   Volume2,
 } from 'lucide-react';
 import type { LessonCheckQuestion, LessonSlide, LessonSlideKind } from '../lib/lesson-content';
+import { setWindowFullscreen } from '../lib/fullscreen';
 import { usePrefs } from '../lib/prefs';
 import { toSpeechText, useSpeech } from '../lib/speech';
 import { Markdown } from './markdown';
@@ -50,7 +52,7 @@ export function LessonDeck({
   const [index, setIndex] = useState(0);
   const [present, setPresent] = useState(false);
   const [playing, setPlaying] = useState(false);
-  const { speaking, supported, speak, stop } = useSpeech();
+  const { speaking, paused, supported, speak, stop, togglePause } = useSpeech();
   const playToken = useRef(0);
   const total = slides.length + (questions.length > 0 ? 1 : 0);
   const isQuiz = index >= slides.length;
@@ -114,6 +116,71 @@ export function LessonDeck({
     stop();
   }, [stop]);
 
+  // Presenting takes the native window full screen; leaving restores it.
+  useEffect(() => {
+    if (!present) return;
+    void setWindowFullscreen(true);
+    return () => {
+      void setWindowFullscreen(false);
+    };
+  }, [present]);
+
+  /**
+   * Narration controls. Pause holds the voice mid-sentence, Stop ends it, and
+   * neither starts the slide over. Only one set is on screen at a time.
+   */
+  const speechButtons = (alwaysLabel: boolean) => {
+    if (!supported) return null;
+    if (playing) {
+      return (
+        <>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={togglePause}
+            title={paused ? 'Resume narration' : 'Pause narration'}
+          >
+            {paused ? <Play className="size-4" aria-hidden /> : <Pause className="size-4" aria-hidden />}
+            <span className={alwaysLabel ? '' : 'hidden sm:inline'}>{paused ? 'Resume' : 'Pause'}</span>
+          </button>
+          <button type="button" className="btn btn-quiet btn-sm" onClick={stopPlaying} title="Stop narration">
+            <Square className="size-3.5" aria-hidden />
+            <span className={alwaysLabel ? '' : 'hidden sm:inline'}>Stop</span>
+          </button>
+        </>
+      );
+    }
+    return (
+      <>
+        {speaking ? (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={stop} title="Stop reading this slide">
+            <Square className="size-3.5" aria-hidden />
+            <span className={alwaysLabel ? '' : 'hidden sm:inline'}>Stop</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => narrateAt(index, false)}
+            className="btn btn-ghost btn-sm"
+            title="Read this slide aloud"
+          >
+            <Volume2 className="size-4" aria-hidden />
+            <span className={alwaysLabel ? '' : 'hidden sm:inline'}>Listen</span>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={togglePlay}
+          className="btn btn-ghost btn-sm"
+          title="Narrate the whole lesson and advance the slides"
+        >
+          <Play className="size-4" aria-hidden />
+          <span className={alwaysLabel ? '' : 'hidden sm:inline'}>Play lesson</span>
+        </button>
+      </>
+    );
+  };
+
   const goTo = useCallback(
     (next: number) => {
       stopPlaying();
@@ -139,14 +206,16 @@ export function LessonDeck({
         goTo(total - 1);
       } else if (event.key === 'Escape' && present) {
         setPresent(false);
+        stop();
       }
     },
-    [goTo, index, present, total],
+    [goTo, index, present, total, stop],
   );
 
   return (
     <div className="flex flex-col gap-3">
       <div className="lesson-deck">
+        {!present && (
         <nav className="lesson-deck-nav" aria-label="Lesson slides">
           {slides.map((entry, slideIndex) => (
             <button
@@ -176,6 +245,7 @@ export function LessonDeck({
             </button>
           )}
         </nav>
+        )}
 
         <section
           className="lesson-stage"
@@ -189,13 +259,7 @@ export function LessonDeck({
           {present && (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
               <p className="text-[15px] font-medium">{title}</p>
-              <div className="flex items-center gap-1.5">
-                {supported && (
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={togglePlay}>
-                    {playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
-                    {playing ? 'Pause' : 'Listen'}
-                  </button>
-                )}
+              <div className="flex items-center gap-1.5">{speechButtons(true)}
                 <button
                   type="button"
                   onClick={() => goTo(index - 1)}
@@ -214,7 +278,14 @@ export function LessonDeck({
                 >
                   <ChevronRight className="size-4" aria-hidden />
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPresent(false)}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setPresent(false);
+                    stop();
+                  }}
+                >
                   <Minimize2 className="size-4" aria-hidden />
                   Exit
                 </button>
@@ -225,29 +296,7 @@ export function LessonDeck({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="slide-kind">{isQuiz ? 'Check yourself' : KIND_LABEL[slide?.kind ?? 'concept']}</span>
             {!present && (
-              <div className="flex items-center gap-1.5">
-                {supported && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => narrateAt(index, false)}
-                      className="btn btn-ghost btn-sm"
-                      title="Read this slide aloud"
-                    >
-                      <Volume2 className="size-4" aria-hidden />
-                      <span className="hidden sm:inline">{speaking ? 'Replay' : 'Listen'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={togglePlay}
-                      className="btn btn-ghost btn-sm"
-                      title="Narrate the whole lesson and advance the slides"
-                    >
-                      {playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
-                      <span className="hidden sm:inline">{playing ? 'Pause' : 'Play lesson'}</span>
-                    </button>
-                  </>
-                )}
+              <div className="flex items-center gap-1.5">{speechButtons(false)}
                 <button
                   type="button"
                   onClick={() => setPresent((value) => !value)}
@@ -373,10 +422,12 @@ export function LessonDeck({
             </button>
           </div>
 
-          <p className="mt-2 text-center text-[12.5px] text-text-muted">
-            <Sparkles className="mr-1 inline size-3 align-[-1px]" aria-hidden />
-            Use the arrow keys to move through the lesson.
-          </p>
+          {!present && (
+            <p className="mt-2 text-center text-[12.5px] text-text-muted">
+              <Sparkles className="mr-1 inline size-3 align-[-1px]" aria-hidden />
+              Use the arrow keys to move through the lesson.
+            </p>
+          )}
         </section>
       </div>
     </div>

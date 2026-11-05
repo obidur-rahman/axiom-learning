@@ -63,22 +63,38 @@ async function runJob(job: JobRow, db: AxiomDb, driver: DbDriver): Promise<void>
     }
     if (job.jobType === 'build_topics') {
       const course = await requireCourse(driver, job.courseId);
+      // Syllabus pages first: they carry the topic list, and chunked extraction
+      // samples evenly, so those chunks are always part of the run.
       const pages = await driver.select<{ text: string | null }>(
         `SELECT p.text FROM material_pages p
          JOIN materials m ON m.id = p.material_id
-         WHERE m.course_id = $1 ORDER BY p.id`,
+         WHERE m.course_id = $1 AND p.text IS NOT NULL AND p.text <> ''
+         ORDER BY CASE m.kind
+             WHEN 'syllabus' THEN 0 WHEN 'notes' THEN 1
+             WHEN 'past_questions' THEN 2 ELSE 3 END,
+           m.created_at, p.page_number`,
         [job.courseId],
       );
       if (pages.length === 0) {
         throw new Error('No readable pages yet. Upload material first.');
       }
+      report(10, `Reading ${pages.length} page${pages.length === 1 ? '' : 's'}`);
       const ctx: RunContext = { db, course, config: loadConfig };
-      await buildTopicsStep(ctx, pages);
+      await buildTopicsStep(ctx, pages, (done, total) =>
+        report(
+          15 + Math.round((done / Math.max(1, total)) * 70),
+          `Extracting topics from part ${done} of ${total}`,
+        ),
+      );
+      report(90, 'Saving the topic list');
       await complete(driver, job.id);
     } else if (job.jobType === 'build_roadmap') {
       const course = await requireCourse(driver, job.courseId);
+      report(15, 'Loading the topics');
       const ctx: RunContext = { db, course, config: loadConfig };
+      report(45, 'Proposing prerequisites with the model');
       await buildRoadmapStep(ctx);
+      report(90, 'Saving the new roadmap');
       await complete(driver, job.id);
     } else if (job.jobType === 'build_lesson') {
       const payload = (job.payload as { topicId?: unknown; depth?: unknown } | null) ?? {};
@@ -107,13 +123,17 @@ async function runJob(job: JobRow, db: AxiomDb, driver: DbDriver): Promise<void>
       });
     } else if (job.jobType === 'extract_past_questions') {
       const course = await requireCourse(driver, job.courseId);
+      report(20, 'Reading the past-paper pages');
       const ctx: RunContext = { db, course, config: loadConfig };
       await extractPastQuestionsStep(ctx);
+      report(90, 'Saving the questions');
       await complete(driver, job.id);
     } else if (job.jobType === 'generate_questions') {
       const course = await requireCourse(driver, job.courseId);
+      report(20, 'Writing questions from the notes');
       const ctx: RunContext = { db, course, config: loadConfig };
       await generateQuestionsStep(ctx);
+      report(90, 'Saving the questions');
       await complete(driver, job.id);
     } else {
       // Unknown kind: finish it so the queue does not clog.

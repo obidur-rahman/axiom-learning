@@ -382,12 +382,14 @@ export function CourseLibrary() {
                       </button>
                     </div>
 
+                    {/* Progress strip */}
                     <div className="mt-4 flex items-center gap-3">
-                      <ProgressBar
-                        label={`${entry.course.title} progress`}
-                        value={percent}
-                        className="flex-1"
-                      />
+                      <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all duration-500"
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
                       <span className="num text-[11.5px] text-text-muted">
                         {entry.planned === 0
                           ? 'No roadmap'
@@ -397,6 +399,7 @@ export function CourseLibrary() {
                       </span>
                     </div>
 
+                    {/* Stats row */}
                     <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-3 text-center">
                       <div>
                         <dt className="text-[10.5px] uppercase tracking-wide text-text-muted">Material</dt>

@@ -5,6 +5,7 @@ export * from './init';
 export * from './tauri';
 export * from './courses';
 export * from './materials';
+export { storeFileData, getFileData } from './materials';
 export * from './roadmaps';
 export * from './progress';
 export * from './lessons';

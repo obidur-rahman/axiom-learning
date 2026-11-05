@@ -72,10 +72,12 @@ function StatusDot({ status }: { status: string }) {
   return <span aria-hidden className="size-1.5 rounded-full" style={{ background: tone }} />;
 }
 
-function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
+function StatCard({ label, value, hint, accent }: { label: string; value: string; hint: string; accent?: string }) {
   return (
     <div className="card p-4">
-      <p className="stat-value">{value}</p>
+      <p className="stat-value" style={accent ? { color: accent } : undefined}>
+        {value}
+      </p>
       <p className="stat-label">{label}</p>
       <p className="mt-1.5 text-[12.5px] leading-snug text-text-muted/90">{hint}</p>
     </div>
@@ -234,16 +236,19 @@ export function Dashboard() {
               label="Courses"
               value={String(summaries.length)}
               hint={`${summaries.filter((entry) => entry.planned > 0).length} with a roadmap`}
+              accent="var(--color-accent)"
             />
             <StatCard
               label="Topics finished"
               value={planned === 0 ? '—' : `${finished}/${planned}`}
               hint={planned === 0 ? 'Build a roadmap to track this' : 'Core and bridge topics done or known'}
+              accent="var(--color-known)"
             />
             <StatCard
               label="Readable pages"
               value={String(pages)}
               hint="Pages the tutor and lessons can cite"
+              accent="var(--color-core)"
             />
             <StatCard
               label="Next exam"
@@ -253,6 +258,7 @@ export function Dashboard() {
                   : examText(nextExam.course.examDate, prefs.showCountdown)
               }
               hint={nextExam === undefined ? 'No exam date set' : nextExam.course.title}
+              accent={nextExam?.course.examDate !== null ? 'var(--color-bridge)' : undefined}
             />
           </section>
 
@@ -379,11 +385,11 @@ export function Dashboard() {
                     Nothing uploaded yet. Open a course and add the syllabus first.
                   </p>
                 ) : (
-                  <ul className="mt-2">
+                  <ul className="mt-2 flex flex-col gap-2">
                     {recent.map((item) => (
-                      <li key={item.id} className="row flex items-center justify-between gap-3">
+                      <li key={item.id} className="flex items-center justify-between gap-3 rounded-[var(--radius)] border border-border bg-surface px-3 py-2">
                         <div className="min-w-0">
-                          <p className="truncate text-[13.5px]">
+                          <p className="truncate text-[13.5px] font-medium">
                             {MATERIAL_KIND_LABEL[item.kind] ?? 'Material'}
                             {item.pageCount !== null ? ` · ${item.pageCount}p` : ''}
                           </p>

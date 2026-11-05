@@ -32,23 +32,26 @@ export class PipelineError extends Error {
   }
 }
 
-const TopicListSchema = z.object({
-  topics: z
-    .array(z.object({ id: z.string().min(1), title: z.string().min(1) }))
-    .min(1)
-    .max(200),
+const TopicItemSchema = z.object({ id: z.string().min(1), title: z.string().min(1) });
+const EdgeItemSchema = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  confidence: z.number().min(0).max(1),
 });
-const EdgeListSchema = z.object({
-  edges: z
-    .array(
-      z.object({
-        from: z.string().min(1),
-        to: z.string().min(1),
-        confidence: z.number().min(0).max(1),
-      }),
-    )
-    .max(2000),
-});
+
+/**
+ * Small models regularly answer with the bare list instead of the wrapper
+ * object the prompt asks for (`[...]` instead of `{"topics":[...]}`). That is
+ * a formatting slip, not a bad answer, so unwrap it before validating.
+ */
+const TopicListSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? { topics: value } : value),
+  z.object({ topics: z.array(TopicItemSchema).min(1).max(200) }),
+);
+const EdgeListSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? { edges: value } : value),
+  z.object({ edges: z.array(EdgeItemSchema).max(2000) }),
+);
 
 /**
  * One small bounded model task: JSON-mode chat, Zod-validated, up to 2
@@ -87,26 +90,89 @@ export async function boundedModelTask<T>(
   return data;
 }
 
-const MAX_INPUT_CHARS = 20_000;
+/**
+ * Characters of material per model call. Local models usually run with a 4k
+ * token context (~2.4k tokens of text, plus prompt and answer); a single
+ * 20k-character request was rejected with HTTP 400 "exceeds the available
+ * context size" before any topic was extracted.
+ */
+const MATERIAL_CHAR_BUDGET = 4_500;
+/** Bound on extraction calls for one course, so 130 pages stay workable. */
+const MAX_TOPIC_CHUNKS = 8;
 
-/** Step 2 (TRD 5.2): build the Topic list from syllabus/notes pages. */
+/** Splits the readable pages into request-sized groups, keeping page headers. */
+function chunkMaterial(pages: { text: string | null }[]): string[] {
+  const chunks: string[] = [];
+  let current = '';
+  pages.forEach((page, index) => {
+    const text = (page.text ?? '').slice(0, MATERIAL_CHAR_BUDGET);
+    if (text.trim() === '') return;
+    const block = `PAGE ${index + 1}\n${text}`;
+    if (current !== '' && current.length + block.length > MATERIAL_CHAR_BUDGET) {
+      chunks.push(current);
+      current = '';
+    }
+    current += (current === '' ? '' : '\n') + block;
+  });
+  if (current.trim() !== '') chunks.push(current);
+  return chunks;
+}
+
+/** Spreads picks across the list, so the first and last pages are represented. */
+function evenlySpaced<T>(items: T[], limit: number): T[] {
+  if (items.length <= limit) return items;
+  const step = (items.length - 1) / (limit - 1);
+  return Array.from({ length: limit }, (_, index) => items[Math.round(index * step)] as T);
+}
+
+/** The provider refused the request because it does not fit the context. */
+function isContextOverflow(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  return /context|exceed|too many tokens|too long/i.test(error.message);
+}
+
+async function extractTopicsFrom(ctx: RunContext, material: string) {
+  const ask = (content: string) =>
+    boundedModelTask(ctx, TOPIC_EXTRACTION, `<material>\n${content}\n</material>`, TopicListSchema);
+  try {
+    return await ask(material);
+  } catch (error) {
+    if (!isContextOverflow(error) || material.length <= MATERIAL_CHAR_BUDGET / 2) throw error;
+    // A smaller context than expected: retry once with a shorter slice rather
+    // than failing the whole topic build.
+    return ask(material.slice(0, Math.floor(MATERIAL_CHAR_BUDGET / 2)));
+  }
+}
+
+/**
+ * Step 2 (TRD 5.2): build the Topic list from syllabus/notes pages. The pages
+ * are read in budget-sized chunks and the topic lists merged, so a long scan
+ * produces topics instead of a context-length error.
+ */
 export async function buildTopicsStep(
   ctx: RunContext,
   pages: { text: string | null }[],
+  onProgress?: (done: number, total: number) => void,
 ): Promise<Topic[]> {
-  const material = pages
-    .map((page, index) => `PAGE ${index + 1}\n${page.text ?? ''}`)
-    .join('\n')
-    .slice(0, MAX_INPUT_CHARS);
-  if (material.trim().length === 0) {
+  const chunks = evenlySpaced(chunkMaterial(pages), MAX_TOPIC_CHUNKS);
+  if (chunks.length === 0) {
     throw new PipelineError('limits', 'The material has no readable text yet.');
   }
-  const { topics } = await boundedModelTask(
-    ctx,
-    TOPIC_EXTRACTION,
-    `<material>\n${material}\n</material>`,
-    TopicListSchema,
-  );
+  const titles = new Map<string, string>();
+  for (const [index, chunk] of chunks.entries()) {
+    const { topics } = await extractTopicsFrom(ctx, chunk);
+    for (const topic of topics) {
+      const title = topic.title.trim();
+      if (title === '') continue;
+      const key = title.toLowerCase();
+      if (!titles.has(key)) titles.set(key, title);
+    }
+    onProgress?.(index + 1, chunks.length);
+  }
+  const topics = [...titles.values()].map((title, index) => ({ id: `T${index + 1}`, title }));
+  if (topics.length === 0) {
+    throw new PipelineError('schema', 'The model found no topics in this material.');
+  }
   await upsertTopics(ctx.db.driver, ctx.course.id, topics, 'syllabus');
   await recalculateWeights(ctx);
   return topics;
@@ -196,7 +262,7 @@ export async function buildRoadmapStep(ctx: RunContext): Promise<{ version: numb
     const proposal = await boundedModelTask(
       ctx,
       EDGE_PROPOSAL,
-      `Topics:\n${listing.slice(0, MAX_INPUT_CHARS)}\n`,
+      `Topics:\n${listing.slice(0, MATERIAL_CHAR_BUDGET)}\n`,
       EdgeListSchema,
     );
     modelEdges = proposal.edges.filter(

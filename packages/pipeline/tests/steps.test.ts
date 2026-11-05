@@ -133,6 +133,27 @@ describe('buildTopicsStep', () => {
     expect(driver.calls.filter((call) => call.sql.startsWith('INSERT'))).toHaveLength(0);
   });
 
+  it('accepts a bare topic array and still shows the object shape to the model', async () => {
+    const { ctx } = makeCtx({ topics: [], topic_weights: [], roadmap_versions: [] });
+    let systemPrompt = '';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          messages?: { role: string; content: string }[];
+        };
+        systemPrompt = body.messages?.[0]?.content ?? '';
+        return chatResponse([
+          { id: 'T1', title: 'Ohm law' },
+          { id: 'T2', title: 'RC circuits' },
+        ]);
+      }),
+    );
+    const topics = await buildTopicsStep(ctx, [{ text: 'Ohm law and RC circuits.' }]);
+    expect(topics.map((topic) => topic.title)).toEqual(['Ohm law', 'RC circuits']);
+    expect(systemPrompt).toContain('"topics"');
+  });
+
   it('retries and then throws schema after three bad model answers', async () => {
     const { ctx } = makeCtx({ topics: [], topic_weights: [], roadmap_versions: [] });
     vi.stubGlobal(

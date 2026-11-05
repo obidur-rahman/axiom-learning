@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
   deleteMaterial,
   enqueue,
@@ -8,6 +9,7 @@ import {
   listPages,
   replacePages,
   updateMaterialStatus,
+  storeFileData,
   type Material,
   type MaterialPage,
 } from '@axiom/data';
@@ -15,6 +17,8 @@ import { embedAndStorePages, type ExtractedPage } from '@axiom/pipeline';
 import { onAppEvent } from '../lib/events';
 import {
   arrayBufferToBase64,
+  extractPdfTextLayer,
+  extractScannedPdf,
   makeAppExtractors,
   makeVisionReader,
   pdfPageToBase64Png,
@@ -22,17 +26,13 @@ import {
 import { loadConfig } from '../lib/provider';
 import { getDb } from '../lib/db';
 import { loadPrefs, usePrefs } from '../lib/prefs';
+import { WorkProgress, type WorkState } from './work-progress';
 
 type DbHandle = Awaited<ReturnType<typeof getDb>>;
 
 interface Item {
   material: Material;
   pages: MaterialPage[];
-}
-
-interface ReadState {
-  phase: 'idle' | 'reading' | 'done' | 'error';
-  message: string;
 }
 
 function toPagePatch(page: ExtractedPage) {
@@ -54,7 +54,9 @@ function toPagePatch(page: ExtractedPage) {
 export function UploadPanel({ courseId }: { courseId: string }) {
   const prefs = usePrefs();
   const [items, setItems] = useState<Item[]>([]);
-  const [read, setRead] = useState<ReadState>({ phase: 'idle', message: '' });
+  const [work, setWork] = useState<WorkState | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [pasteFor, setPasteFor] = useState<number | null>(null);
   const [pasteText, setPasteText] = useState('');
   const [activeMaterialId, setActiveMaterialId] = useState<string | null>(null);
@@ -86,86 +88,160 @@ export function UploadPanel({ courseId }: { courseId: string }) {
   const handleFiles = useCallback(
     async (files: FileList | null) => {
       if (files === null || files.length === 0) return;
-      const db = await getDb();
-      const extractors = makeAppExtractors();
-      for (const file of Array.from(files)) {
-        // Files stay on this machine. Let the local reader handle the size
-        // instead of rejecting a PDF before it has tried to read it.
-        const material = await db.materials.createMaterial(db.driver, {
-          courseId,
-          kind: uploadKind,
-          mimeType: file.type,
-          sizeBytes: file.size,
-        });
-        sessionFiles.current.set(material.id, file);
-        setRead({ phase: 'reading', message: `Reading ${file.name}...` });
-        try {
-          const data = await file.arrayBuffer();
-          let pages: ExtractedPage[];
-          if (file.type === 'application/pdf') {
-            pages = await extractors.extractPdf(data);
-          } else if (file.type.startsWith('image/')) {
-            pages = [await extractors.extractImage(data, file.type)];
-          } else {
-            pages = [extractors.extractText(await file.text())];
-          }
+      const list = Array.from(files);
+      setBusy(true);
+      setNotice(null);
+      setWork({ label: list[0]?.name ?? 'Material', detail: 'Preparing the read', percent: 0, tone: 'busy' });
+      const failures: string[] = [];
+      try {
+        const db = await getDb();
+        const extractors = makeAppExtractors();
+        for (const [index, file] of list.entries()) {
+          const position = list.length > 1 ? `File ${index + 1}/${list.length}: ` : '';
+          const label = `${position}${file.name}`;
+          const step = (detail: string, percent: number) =>
+            setWork({ label, detail, percent, tone: 'busy' });
+          const pageStep = (page: number, total: number, method: string) => {
+            const what =
+              method === 'text_layer'
+                ? 'Reading the text layer, page'
+                : method === 'vision'
+                  ? 'Vision reading page'
+                  : 'OCR page';
+            step(`${what} ${page} of ${total}`, 12 + Math.round((page / Math.max(1, total)) * 70));
+          };
+          let materialId: string | null = null;
+          try {
+            // Files stay on this machine. Read the bytes first so we can store
+            // them for the preview panel and run extraction in one pass.
+            step('Reading the file from disk', 3);
+            const data = await file.arrayBuffer();
+            const material = await db.materials.createMaterial(db.driver, {
+              courseId,
+              kind: uploadKind,
+              mimeType: file.type,
+              sizeBytes: file.size,
+            });
+            materialId = material.id;
+            step('Storing a copy for the page preview', 8);
+            await storeFileData(db.driver, material.id, data, file.type);
+            sessionFiles.current.set(material.id, file);
 
-          // Vision fallback when OCR/text layer produced nothing usable.
-          const unreadable = pages.every((page) => page.text === null);
-          if (unreadable && loadConfig !== undefined) {
-            const reader = makeVisionReader(loadConfig);
+            const config = await loadConfig().catch(() => null);
+            const vision = config === null ? undefined : makeVisionReader(async () => config);
+
+            let pages: ExtractedPage[];
             if (file.type === 'application/pdf') {
-              const base64 = await pdfPageToBase64Png(data, 1);
-              pages = [await reader({ base64, mime: 'image/png' })];
-            } else if (file.type.startsWith('image/')) {
-              pages = [await reader({ base64: arrayBufferToBase64(data), mime: file.type })];
-            }
-          }
-          if (pages.every((page) => page.text === null)) {
-            throw new Error('no text found - paste the text instead');
-          }
-
-          await replacePages(db.driver, material.id, pages.map(toPagePatch));
-          await updateMaterialStatus(db.driver, material.id, {
-            status: 'ready',
-            pageCount: pages.length,
-          });
-          await enqueue(db.driver, 'build_topics', { courseId });
-          if (prefs.autoRebuildRoadmap) {
-            await enqueue(db.driver, 'build_roadmap', { courseId });
-          }
-          // Best effort: with an embedding model configured, store page
-          // vectors so tutor/practice retrieval upgrades to cosine search.
-          const desired = loadConfig !== undefined ? await loadConfig() : null;
-          if (desired !== null && desired.embedModel !== undefined && prefs.autoEmbedPages) {
-            try {
-              const count = await embedAndStorePages(
-                db.driver,
-                material.id,
-                pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
-                desired,
+              step('Reading the PDF text layer, page 1', 12);
+              pages = await extractPdfTextLayer(data, (page, total) =>
+                pageStep(page, total, 'text_layer'),
               );
-              setRead({
-                phase: 'done',
-                message: `${file.name}: ${pages.length} pages read (${count} embedded).`,
-              });
-            } catch {
-              setRead({ phase: 'done', message: `${file.name}: ${pages.length} pages read.` });
+              if (pages.every((page) => page.text === null)) {
+                // A CamScanner-style scan has no text layer at all. Read every
+                // page as an image - OCR first, vision for what OCR cannot read.
+                step('No text layer - reading every page as an image', 12);
+                pages = await extractScannedPdf(data, {
+                  onProgress: ({ page, total, method }) => pageStep(page, total, method),
+                  ...(vision === undefined ? {} : { readVision: vision }),
+                });
+              }
+            } else if (file.type.startsWith('image/')) {
+              step('Running OCR on the image', 20);
+              const page = await extractors.extractImage(data, file.type);
+              pages = [page];
+              if (page.text === null && vision !== undefined) {
+                step('OCR found no text - vision reading the image', 55);
+                pages = [await vision({ base64: arrayBufferToBase64(data), mime: file.type })];
+              }
+            } else {
+              step('Reading the text file', 30);
+              pages = [extractors.extractText(await file.text())];
             }
-          } else {
-            setRead({ phase: 'done', message: `${file.name}: ${pages.length} pages read.` });
+            if (pages.every((page) => page.text === null)) {
+              throw new Error(
+                'Every page came back empty. Set a vision model in Settings, or paste the text on the Material tab.',
+              );
+            }
+
+            step(`Saving ${pages.length} page${pages.length === 1 ? '' : 's'}`, 88);
+            await replacePages(db.driver, material.id, pages.map(toPagePatch));
+            await updateMaterialStatus(db.driver, material.id, {
+              status: 'ready',
+              pageCount: pages.length,
+            });
+            step('Queued topic extraction', 93);
+            await enqueue(db.driver, 'build_topics', { courseId });
+            if (prefs.autoRebuildRoadmap) {
+              step('Queued the roadmap build', 95);
+              await enqueue(db.driver, 'build_roadmap', { courseId });
+            }
+
+            // Best effort: with an embedding model configured, store page
+            // vectors so tutor/practice retrieval upgrades to cosine search.
+            let embedded = 0;
+            if (config !== null && config.embedModel !== undefined && prefs.autoEmbedPages) {
+              try {
+                step('Embedding pages for retrieval', 97);
+                embedded = await embedAndStorePages(
+                  db.driver,
+                  material.id,
+                  pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
+                  config,
+                );
+              } catch {
+                embedded = 0;
+              }
+            }
+
+            const readable = pages.filter((page) => page.text !== null).length;
+            setNotice(
+              `${file.name}: ${pages.length} page${pages.length === 1 ? '' : 's'} read` +
+                ` (${readable} with text${embedded > 0 ? `, ${embedded} embedded` : ''}). ` +
+                'Topic extraction runs in the background.',
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (materialId !== null) {
+              await updateMaterialStatus(db.driver, materialId, {
+                status: 'failed',
+                errorMessage: message,
+              }).catch(() => undefined);
+            }
+            failures.push(`${file.name}: ${message}`);
+            setWork({
+              label: `${label} could not be read`,
+              detail: message,
+              percent: null,
+              tone: 'error',
+            });
           }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          await updateMaterialStatus(db.driver, material.id, {
-            status: 'failed',
-            errorMessage: message,
-          });
-          setRead({ phase: 'error', message: `${file.name}: ${message}` });
         }
+      } catch (error) {
+        setWork({
+          label: 'The upload could not start',
+          detail: error instanceof Error ? error.message : String(error),
+          percent: null,
+          tone: 'error',
+        });
+      } finally {
+        setBusy(false);
+        if (fileInput.current !== null) fileInput.current.value = '';
+        await load();
       }
-      if (fileInput.current !== null) fileInput.current.value = '';
-      await load();
+      if (failures.length > 0) {
+        setWork({
+          label:
+            failures.length === 1
+              ? 'One file could not be read'
+              : `${failures.length} files could not be read`,
+          detail: failures.join(' · '),
+          percent: null,
+          tone: 'error',
+        });
+        setNotice(null);
+      } else {
+        setWork(null);
+      }
     },
     [courseId, load, uploadKind, prefs.autoRebuildRoadmap, prefs.autoEmbedPages],
   );
@@ -176,13 +252,20 @@ export function UploadPanel({ courseId }: { courseId: string }) {
       const file = sessionFiles.current.get(materialId);
       const db = await getDb();
       if (file === undefined) {
-        setRead({
-          phase: 'error',
-          message: 'The file is no longer in memory. Add it again to use vision read.',
+        setWork({
+          label: `Page ${pageNumber} could not be re-read`,
+          detail: 'The file is no longer in memory. Add it again to use vision read.',
+          percent: null,
+          tone: 'error',
         });
         return;
       }
-      setRead({ phase: 'reading', message: `Vision read of page ${pageNumber}...` });
+      setWork({
+        label: `Vision read of page ${pageNumber}`,
+        detail: 'Sending the page image to the vision model',
+        percent: null,
+        tone: 'busy',
+      });
       try {
         const data = await file.arrayBuffer();
         const reader = makeVisionReader(loadConfig);
@@ -204,11 +287,14 @@ export function UploadPanel({ courseId }: { courseId: string }) {
             })),
           toPagePatch({ ...read1, pageNumber }),
         ]);
-        setRead({ phase: 'done', message: `Page ${pageNumber} re-read.` });
+        setWork(null);
+        setNotice(`Page ${pageNumber} re-read.`);
       } catch (error) {
-        setRead({
-          phase: 'error',
-          message: error instanceof Error ? error.message : String(error),
+        setWork({
+          label: `Page ${pageNumber} could not be re-read`,
+          detail: error instanceof Error ? error.message : String(error),
+          percent: null,
+          tone: 'error',
         });
       }
       await load();
@@ -242,7 +328,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
       if (loadPrefs().autoRebuildRoadmap) {
         await enqueue(db.driver, 'build_roadmap', { courseId });
       }
-      setRead({ phase: 'done', message: `Page ${pageNumber} replaced.` });
+      setNotice(`Page ${pageNumber} replaced.`);
       setPasteFor(null);
       setPasteText('');
       await load();
@@ -287,9 +373,11 @@ export function UploadPanel({ courseId }: { courseId: string }) {
         </label>
         <button
           onClick={() => fileInput.current?.click()}
-          className="rounded-[var(--radius)] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90"
+          disabled={busy}
+          aria-busy={busy}
+          className="rounded-[var(--radius)] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90 disabled:opacity-60"
         >
-          Add material
+          {busy ? 'Reading...' : 'Add material'}
         </button>
         <RebuildButton courseId={courseId} />
         <input
@@ -334,15 +422,19 @@ export function UploadPanel({ courseId }: { courseId: string }) {
         );
       })()}
 
-      {read.phase !== 'idle' && (
-        <p className={read.phase === 'error' ? 'text-sm text-danger' : 'text-sm text-text-muted'}>
-          {read.message}
+      {work !== null && <WorkProgress work={work} onDismiss={() => setWork(null)} />}
+
+      {notice !== null && (
+        <p className="text-sm text-text-muted" role="status">
+          {notice}
         </p>
       )}
 
       <ul className="flex flex-col gap-3">
         {items.map(({ material, pages }) => {
           const flagged = prefs.flagLowConfidence ? pages.filter((page) => page.lowConfidence) : [];
+          const hasPages = pages.length > 0;
+
           return (
             <li key={material.id} className="rounded-[var(--radius)] border border-border bg-surface p-3">
               <div className="flex items-center justify-between gap-3">
@@ -350,16 +442,26 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                   <p className="text-sm font-medium">{material.kind.toUpperCase()}</p>
                   <p className="text-xs text-text-muted">
                     {material.status}
-                    {pages.length > 0 && ` - ${pages.length} pages`}
-                    {flagged.length > 0 && ` - ${flagged.length} low-confidence`}
+                    {hasPages && ` — ${pages.length} pages`}
+                    {flagged.length > 0 && ` — ${flagged.length} low-confidence`}
                   </p>
                 </div>
-                <button
-                  onClick={() => void handleDelete(material.id)}
-                  className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs hover:border-danger hover:text-danger"
-                >
-                  Delete
-                </button>
+                <div className="flex items-center gap-2">
+                  {hasPages && (
+                    <Link
+                      href={`/preview?id=${material.id}`}
+                      className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs text-text no-underline hover:border-accent"
+                    >
+                      Review pages
+                    </Link>
+                  )}
+                  <button
+                    onClick={() => void handleDelete(material.id)}
+                    className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs hover:border-danger hover:text-danger"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
               {material.errorMessage !== null && (
                 <p className="mt-1 text-xs text-danger">{material.errorMessage}</p>
@@ -434,8 +536,8 @@ export function UploadPanel({ courseId }: { courseId: string }) {
           );
         })}
         {items.length === 0 && (
-          <li className="rounded-[var(--radius)] border border-border bg-surface p-4 text-sm text-text-muted">
-            No material yet. Add the syllabus first, then notes and past question papers.
+          <li className="rounded-[var(--radius)] border border-dashed border-border-strong bg-surface p-5 text-sm text-text-muted">
+            No material yet. Drop a syllabus, notes or past paper above to see its pages previewed here.
           </li>
         )}
       </ul>
@@ -459,9 +561,10 @@ function RebuildButton({ courseId }: { courseId: string }) {
           }
         })();
       }}
+      aria-busy={busy}
       className="rounded-[var(--radius)] border border-border px-4 py-2 text-sm hover:border-accent disabled:opacity-50"
     >
-      Rebuild roadmap
+      {busy ? 'Queueing...' : 'Rebuild roadmap'}
     </button>
   );
 }

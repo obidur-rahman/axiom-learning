@@ -221,11 +221,7 @@ export function RoadmapPanel({ courseId }: { courseId: string }) {
   );
 
   if (roadmap === null) {
-    return (
-      <p className="rounded-[var(--radius)] border border-border bg-surface p-4 text-sm text-text-muted">
-        No roadmap yet. Check the Material tab and press Rebuild roadmap.
-      </p>
-    );
+    return <RoadmapEmpty courseId={courseId} />;
   }
 
   const coreCount = roadmap.nodes.filter((node) => node.type === 'core').length;
@@ -417,7 +413,157 @@ export function RoadmapPanel({ courseId }: { courseId: string }) {
         </section>
       )}
 
-      {busy && <p className="text-xs text-text-muted" aria-live="polite">Applying change...</p>}
+      {busy && (
+        <p className="flex items-center gap-2 text-xs text-text-muted" aria-live="polite">
+          <span aria-hidden className="spinner" />
+          Applying the change and rebuilding the roadmap...
+        </p>
+      )}
     </div>
+  );
+}
+
+interface Diagnosis {
+  materials: number;
+  failedMaterials: number;
+  pages: number;
+  topics: number;
+  error: string | null;
+  errorJob: string | null;
+}
+
+/**
+ * No roadmap is a dead end without the reason. This shows how far the pipeline
+ * actually got (material stored, pages read, topics extracted) and the exact
+ * error of the last background step that gave up, so a scan nobody could read
+ * or a provider failure is visible instead of an empty graph.
+ */
+function RoadmapEmpty({ courseId }: { courseId: string }) {
+  const [diagnosis, setDiagnosis] = useState<Diagnosis | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    const db = await getDb();
+    const rows = await db.driver.select<Record<string, unknown>>(
+      `SELECT
+         (SELECT COUNT(*) FROM materials WHERE course_id = $1) AS materials,
+         (SELECT COUNT(*) FROM materials WHERE course_id = $1 AND status = 'failed') AS failed_materials,
+         (SELECT COUNT(*) FROM material_pages p
+            JOIN materials m ON m.id = p.material_id
+           WHERE m.course_id = $1 AND p.text IS NOT NULL) AS pages,
+         (SELECT COUNT(*) FROM topics WHERE course_id = $1) AS topics`,
+      [courseId],
+    );
+    const failure = await db.driver.select<{ job_type: string; last_error: string | null }>(
+      `SELECT job_type, last_error FROM jobs
+        WHERE course_id = $1 AND status = 'failed' AND last_error IS NOT NULL
+          AND job_type IN ('build_topics', 'find_prerequisites', 'build_roadmap')
+        ORDER BY COALESCE(finished_at, created_at) DESC LIMIT 1`,
+      [courseId],
+    );
+    const row = rows[0] ?? {};
+    setDiagnosis({
+      materials: Number(row.materials ?? 0),
+      failedMaterials: Number(row.failed_materials ?? 0),
+      pages: Number(row.pages ?? 0),
+      topics: Number(row.topics ?? 0),
+      error: failure[0]?.last_error ?? null,
+      errorJob: failure[0]?.job_type ?? null,
+    });
+  }, [courseId]);
+
+  useEffect(() => {
+    void load();
+    return onAppEvent((event) => {
+      if (event.kind === 'job-updated' && event.courseId === courseId) void load();
+    });
+  }, [load, courseId]);
+
+  const retry = useCallback(async () => {
+    setBusy(true);
+    try {
+      const db = await getDb();
+      await enqueue(db.driver, 'build_topics', { courseId });
+      await enqueue(db.driver, 'build_roadmap', { courseId });
+    } finally {
+      setBusy(false);
+    }
+  }, [courseId]);
+
+  const steps = [
+    {
+      done: (diagnosis?.materials ?? 0) > 0,
+      label:
+        diagnosis === null
+          ? 'Checking the material...'
+          : `${diagnosis.materials} material file${diagnosis.materials === 1 ? '' : 's'} uploaded`,
+      hint: 'Add a syllabus or notes on the Material tab.',
+    },
+    {
+      done: (diagnosis?.pages ?? 0) > 0,
+      label:
+        diagnosis === null
+          ? 'Checking the read pages...'
+          : `${diagnosis.pages} page${diagnosis.pages === 1 ? '' : 's'} with readable text`,
+      hint:
+        diagnosis !== null && diagnosis.failedMaterials > 0
+          ? 'A file was stored but no page produced text. Scanned or handwritten pages need OCR or a vision model.'
+          : 'Open Material and check what the read step found.',
+    },
+    {
+      done: (diagnosis?.topics ?? 0) > 0,
+      label:
+        diagnosis === null
+          ? 'Checking the topics...'
+          : `${diagnosis.topics} topic${diagnosis.topics === 1 ? '' : 's'} extracted`,
+      hint: 'Topic extraction runs in the background after an upload.',
+    },
+  ];
+
+  return (
+    <section className="flex flex-col gap-3 rounded-[var(--radius)] border border-border bg-surface p-4">
+      <p className="text-sm font-medium">No roadmap yet</p>
+      <ul className="flex flex-col gap-2">
+        {steps.map((step) => (
+          <li key={step.label} className="flex items-start gap-2 text-[13px]">
+            <span
+              aria-hidden
+              className="mt-0.5 flex size-4 flex-none items-center justify-center rounded-full border text-[9px]"
+              style={{
+                borderColor: step.done ? 'var(--color-known)' : 'var(--color-border-strong)',
+                color: step.done ? 'var(--color-known)' : 'var(--color-text-muted)',
+              }}
+            >
+              {step.done ? '✓' : '•'}
+            </span>
+            <span className="min-w-0">
+              <span className="block">{step.label}</span>
+              {!step.done && <span className="block text-[12px] text-text-muted">{step.hint}</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {diagnosis?.error !== null && diagnosis !== null && (
+        <div className="rounded-[var(--radius)] border border-danger/40 bg-surface p-3">
+          <p className="text-[12px] font-medium text-danger">
+            The last background step failed ({diagnosis.errorJob ?? 'build'}):
+          </p>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-danger" style={{ overflowWrap: 'anywhere' }}>
+            {diagnosis.error}
+          </p>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={() => void retry()}
+        disabled={busy}
+        aria-busy={busy}
+        className="btn btn-primary btn-sm self-start"
+      >
+        {busy ? 'Queueing...' : 'Rebuild from the material'}
+      </button>
+    </section>
   );
 }

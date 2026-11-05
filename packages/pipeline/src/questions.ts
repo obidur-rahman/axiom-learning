@@ -41,9 +41,12 @@ const ExtractedQuestionSchema = z.object({
   citationPages: z.array(z.number().int().min(1)).max(40).default([]),
 });
 
-const ExtractionSchema = z.object({
-  questions: z.array(ExtractedQuestionSchema).max(60),
-});
+// Models sometimes answer with the bare list instead of {"questions": [...]};
+// that is a formatting slip, so unwrap it before validating.
+const ExtractionSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? { questions: value } : value),
+  z.object({ questions: z.array(ExtractedQuestionSchema).max(60) }),
+);
 
 const GeneratedQuestionSchema = z.object({
   prompt: z.string().min(4),
@@ -56,9 +59,10 @@ const GeneratedQuestionSchema = z.object({
   citationPages: z.array(z.number().int().min(1)).max(40).default([]),
 });
 
-const GenerationSchema = z.object({
-  questions: z.array(GeneratedQuestionSchema).min(1).max(6),
-});
+const GenerationSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? { questions: value } : value),
+  z.object({ questions: z.array(GeneratedQuestionSchema).min(1).max(6) }),
+);
 
 export interface QuestionJobResult {
   extracted: number;
@@ -72,7 +76,8 @@ interface RawPage {
   text: string | null;
 }
 
-const CHUNK_CHARS = 6_000;
+/** Request-sized per model call; a 4k-token context holds roughly this much. */
+const CHUNK_CHARS = 2_500;
 
 function chunkPages(pages: RawPage[]): RawPage[][] {
   const chunks: RawPage[][] = [];
@@ -136,10 +141,10 @@ export async function extractPastQuestionsStep(ctx: RunContext): Promise<Questio
     const material = chunk
       .map(
         (page) =>
-          `PAGE ${page.page_number} (material ${page.material_id})\n${(page.text ?? '').slice(0, 4_000)}`,
+          `PAGE ${page.page_number} (material ${page.material_id})\n${(page.text ?? '').slice(0, 2_000)}`,
       )
       .join('\n\n')
-      .slice(0, CHUNK_CHARS + 2_000);
+      .slice(0, CHUNK_CHARS);
     const result = await boundedModelTask(
       ctx,
       PAST_QUESTION_EXTRACT,
@@ -240,9 +245,9 @@ export async function generateQuestionsStep(ctx: RunContext): Promise<GenerateQu
       ctx,
       QUESTION_GENERATE,
       `<topic>${topic.title}</topic>\n<material>\n${evidence
-        .map((page) => `PAGE ${page.pageNumber}\n${page.text.slice(0, 3_500)}`)
+        .map((page) => `PAGE ${page.pageNumber}\n${page.text.slice(0, 2_500)}`)
         .join('\n\n')
-        .slice(0, 10_000)}\n</material>`,
+        .slice(0, 4_000)}\n</material>`,
       GenerationSchema,
       { temperature: 0.3, maxTokens: 1_800 },
     );

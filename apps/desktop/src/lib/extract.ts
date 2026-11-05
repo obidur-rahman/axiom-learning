@@ -26,6 +26,19 @@ interface PdfLoadingTask {
   destroy(): Promise<void>;
 }
 
+/** Renders one page of an open PDF to a PNG, as base64 without the prefix. */
+async function renderPagePng(doc: PdfDocumentProxy, pageNumber: number, scale = 2): Promise<string> {
+  const page = await doc.getPage(pageNumber);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  const context = canvas.getContext('2d');
+  if (context === null) throw new Error('canvas unavailable');
+  await page.render({ canvasContext: context, viewport }).promise;
+  return canvas.toDataURL('image/png').split(',')[1] ?? '';
+}
+
 /** Renders one PDF page to a PNG (base64) for the vision read path. */
 export async function pdfPageToBase64Png(
   data: ArrayBuffer,
@@ -36,15 +49,7 @@ export async function pdfPageToBase64Png(
   const task = pdfjs.getDocument({ data, useSystemFonts: false, disableAutoFetch: true });
   const doc = await task.promise;
   try {
-    const page = await doc.getPage(pageNumber);
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const context = canvas.getContext('2d');
-    if (context === null) throw new Error('canvas unavailable');
-    await page.render({ canvasContext: context, viewport }).promise;
-    return canvas.toDataURL('image/png').split(',')[1] ?? '';
+    return await renderPagePng(doc, pageNumber, scale);
   } finally {
     await task.destroy();
   }
@@ -72,10 +77,18 @@ async function loadPdfJs(): Promise<PdfJs> {
   return pdfjsPromise;
 }
 
-/** Extracts the text layer of every PDF page; null text when it has none. */
-export async function extractPdfTextLayer(data: ArrayBuffer): Promise<ExtractedPage[]> {
+/**
+ * Extracts the text layer of every PDF page; null text when it has none.
+ * `onProgress` fires after each page so the screen can show how far it got.
+ */
+export async function extractPdfTextLayer(
+  data: ArrayBuffer,
+  onProgress?: (page: number, total: number) => void,
+): Promise<ExtractedPage[]> {
   const pdfjs = await loadPdfJs();
-  const task = pdfjs.getDocument({ data, useSystemFonts: false, disableAutoFetch: true });
+  // Hand pdf.js a copy: the caller keeps the bytes for the OCR/vision pass,
+  // and a detached buffer would make that second read fail.
+  const task = pdfjs.getDocument({ data: data.slice(0), useSystemFonts: false, disableAutoFetch: true });
   const doc = await task.promise;
   try {
     const pages: ExtractedPage[] = [];
@@ -89,6 +102,7 @@ export async function extractPdfTextLayer(data: ArrayBuffer): Promise<ExtractedP
         method: 'text_layer',
         confidence: text === '' ? null : 1,
       });
+      onProgress?.(pageNumber, doc.numPages);
     }
     return pages;
   } finally {
@@ -101,24 +115,96 @@ interface TessWorkerLike {
   terminate(): Promise<unknown>;
 }
 
+let ocrWorker: Promise<TessWorkerLike> | null = null;
+
+/** One tesseract worker per session: wasm init is the slow part per file. */
+function getOcrWorker(): Promise<TessWorkerLike> {
+  if (ocrWorker === null) {
+    ocrWorker = (async () => {
+      const { createWorker } = await import('tesseract.js');
+      return (await createWorker()) as unknown as TessWorkerLike;
+    })();
+    ocrWorker.catch(() => {
+      ocrWorker = null;
+    });
+  }
+  return ocrWorker;
+}
+
+function ocrResultToPage(result: { text: string; confidence: number }): ExtractedPage {
+  return {
+    pageNumber: 1,
+    text: result.text.trim() === '' ? null : result.text.trim(),
+    method: 'ocr',
+    confidence: result.confidence / 100,
+  };
+}
+
 /** OCRed one image -> page. Uses tesseract.js worker default language packs. */
 export async function extractOcr(data: ArrayBuffer, mime: string): Promise<ExtractedPage> {
-  const { createWorker } = await import('tesseract.js');
   const blob = new Blob([data], { type: mime });
   const url = URL.createObjectURL(blob);
-  let worker: TessWorkerLike | null = null;
   try {
-    worker = (await createWorker()) as unknown as TessWorkerLike;
+    const worker = await getOcrWorker();
     const { data: result } = await worker.recognize(url);
-    return {
-      pageNumber: 1,
-      text: result.text.trim() === '' ? null : result.text.trim(),
-      method: 'ocr',
-      confidence: result.confidence / 100,
-    };
+    return ocrResultToPage(result);
   } finally {
     URL.revokeObjectURL(url);
-    if (worker) await worker.terminate().catch(() => undefined);
+  }
+}
+
+export interface ScanProgress {
+  page: number;
+  total: number;
+  method: 'ocr' | 'vision';
+}
+
+/** OCR text below this is treated as unread and handed to the vision model. */
+const OCR_MIN_CONFIDENCE = 0.45;
+
+/**
+ * Reads a PDF that has no text layer at all - a CamScanner-style scan of
+ * handwritten pages. Every page is rendered and OCRed (one shared worker),
+ * and pages OCR cannot read are sent to the vision model when one is set up.
+ * Without this a multi-page scan collapsed to page 1 and the roadmap was
+ * built from a single page.
+ */
+export async function extractScannedPdf(
+  data: ArrayBuffer,
+  options: {
+    onProgress?: (progress: ScanProgress) => void;
+    readVision?: (image: VisionImage) => Promise<ExtractedPage>;
+  } = {},
+): Promise<ExtractedPage[]> {
+  const pdfjs = await loadPdfJs();
+  const task = pdfjs.getDocument({ data: data.slice(0), useSystemFonts: false, disableAutoFetch: true });
+  const doc = await task.promise;
+  try {
+    const pages: ExtractedPage[] = [];
+    const worker = await getOcrWorker();
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
+      const image = await renderPagePng(doc, pageNumber);
+      const { data: result } = await worker.recognize(`data:image/png;base64,${image}`);
+      let page: ExtractedPage = { ...ocrResultToPage(result), pageNumber, method: 'ocr' };
+      let method: ScanProgress['method'] = 'ocr';
+      const unreadable = page.text === null || (page.confidence ?? 0) < OCR_MIN_CONFIDENCE;
+      if (unreadable && options.readVision !== undefined) {
+        try {
+          const vision = await options.readVision({ base64: image, mime: 'image/png' });
+          if (vision.text !== null) {
+            page = { ...vision, pageNumber };
+            method = 'vision';
+          }
+        } catch {
+          // Keep the OCR text; the page stays flagged low-confidence.
+        }
+      }
+      pages.push(page);
+      options.onProgress?.({ page: pageNumber, total: doc.numPages, method });
+    }
+    return pages;
+  } finally {
+    await task.destroy();
   }
 }
 

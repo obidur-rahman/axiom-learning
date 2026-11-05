@@ -85,11 +85,30 @@ export function stopSpeaking(): void {
   if (speechSupported()) window.speechSynthesis.cancel();
 }
 
-/** React binding around the engine: one utterance at a time, per component. */
+function pauseSpeaking(): void {
+  if (speechSupported()) window.speechSynthesis.pause();
+}
+
+function resumeSpeaking(): void {
+  if (speechSupported()) window.speechSynthesis.resume();
+}
+
+/**
+ * React binding around the engine: one utterance at a time, per component.
+ * Pause holds the voice where it is and resume continues from that word, so a
+ * listener can stop mid-sentence instead of restarting the slide.
+ */
 export function useSpeech() {
   const [speaking, setSpeaking] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [supported, setSupported] = useState(false);
   const mounted = useRef(true);
+  const pausedRef = useRef(false);
+
+  const applyPaused = useCallback((value: boolean) => {
+    pausedRef.current = value;
+    if (mounted.current) setPaused(value);
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
@@ -103,20 +122,49 @@ export function useSpeech() {
     };
   }, []);
 
-  const speak = useCallback((text: string, onEnd?: () => void) => {
-    speakText(text, {
-      onEnd: () => {
-        if (mounted.current) setSpeaking(false);
-        onEnd?.();
-      },
-    });
-    if (mounted.current) setSpeaking(true);
-  }, []);
+  const speak = useCallback(
+    (text: string, onEnd?: () => void) => {
+      speakText(text, {
+        onEnd: () => {
+          if (mounted.current) {
+            setSpeaking(false);
+            applyPaused(false);
+          }
+          onEnd?.();
+        },
+      });
+      if (mounted.current) {
+        setSpeaking(true);
+        applyPaused(false);
+      }
+    },
+    [applyPaused],
+  );
 
   const stop = useCallback(() => {
     stopSpeaking();
-    if (mounted.current) setSpeaking(false);
-  }, []);
+    if (mounted.current) {
+      setSpeaking(false);
+      applyPaused(false);
+    }
+  }, [applyPaused]);
 
-  return { speaking, supported, speak, stop };
+  const pause = useCallback(() => {
+    if (!speaking) return;
+    pauseSpeaking();
+    applyPaused(true);
+  }, [applyPaused, speaking]);
+
+  const resume = useCallback(() => {
+    if (!speaking) return;
+    resumeSpeaking();
+    applyPaused(false);
+  }, [applyPaused, speaking]);
+
+  const togglePause = useCallback(() => {
+    if (!pausedRef.current) pause();
+    else resume();
+  }, [pause, resume]);
+
+  return { speaking, paused, supported, speak, stop, pause, resume, togglePause };
 }
