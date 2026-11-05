@@ -1,9 +1,25 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LessonBlock, LessonDocument } from '@axiom/data';
-import { ChevronLeft, ChevronRight, Eye, Lightbulb, Maximize2, Minimize2, RefreshCw, Target } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Eye, Lightbulb, Maximize2, Minimize2, RefreshCw, Target, Volume2 } from 'lucide-react';
+import { useSpeech } from '../lib/speech';
 import { Markdown } from './markdown';
+import { SectionAsk } from './section-ask';
+
+/** Flat text of one beat, for narration and for the section-scoped ask box. */
+function beatText(beat: { title: string; intro: string; blocks: LessonBlock[]; takeaway: string | null }): string {
+  const parts = [beat.title, beat.intro];
+  for (const block of beat.blocks) {
+    if (block.type === 'text') parts.push(block.text);
+    else if (block.type === 'steps') parts.push(block.items.join('. '));
+    else if (block.type === 'callout') parts.push(block.text);
+    else if (block.type === 'equation') parts.push(block.latex);
+    else if (block.type === 'compare') parts.push(block.rows.map((row) => row.join(', ')).join('. '));
+  }
+  if (beat.takeaway !== null) parts.push(beat.takeaway);
+  return parts.filter((part) => part !== '').join('. ');
+}
 
 function BlockView({ block }: { block: LessonBlock }) {
   switch (block.type) {
@@ -119,17 +135,28 @@ function RecallBlock({ prompt, answer }: { prompt: string; answer: string }) {
 }
 
 export function LessonBoard({
+  courseId,
   document,
   onRegenerate,
   busy,
 }: {
+  courseId: string;
   document: LessonDocument;
   onRegenerate: () => void;
   busy: boolean;
 }) {
   const [index, setIndex] = useState(0);
   const [present, setPresent] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const { speaking, supported, speak, stop } = useSpeech();
   const beat = document.beats[index];
+
+  const listen = useCallback(() => {
+    if (beat === undefined) return;
+    speak(beatText(beat));
+  }, [beat, speak]);
+
+  useEffect(() => () => stop(), [stop]);
 
   const go = useCallback(
     (next: number) => {
@@ -140,6 +167,8 @@ export function LessonBoard({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      // Another tab may be showing: the board stays mounted, but must not hijack keys.
+      if (rootRef.current === null || rootRef.current.getClientRects().length === 0) return;
       if (event.key === 'ArrowRight') go(index + 1);
       else if (event.key === 'ArrowLeft') go(index - 1);
       else if (event.key === 'Home') go(0);
@@ -160,7 +189,7 @@ export function LessonBoard({
     null;
 
   const board = (
-    <div className="grid gap-4 lg:grid-cols-[210px_1fr]">
+    <div ref={rootRef} className="grid gap-4 lg:grid-cols-[210px_1fr]">
       <aside className="flex flex-col gap-3 rounded-[var(--radius)] border border-border bg-surface p-3">
         <div>
           <p className="text-[10px] uppercase tracking-[0.12em] text-text-muted">Objective</p>
@@ -198,10 +227,10 @@ export function LessonBoard({
         )}
         <button
           type="button"
-          className="btn btn-quiet btn-sm mt-auto"
+          className="btn btn-primary btn-sm mt-auto"
           onClick={() => setPresent(true)}
         >
-          <Maximize2 className="size-3.5" aria-hidden />
+          <Maximize2 className="size-4" aria-hidden />
           Present
         </button>
       </aside>
@@ -217,6 +246,20 @@ export function LessonBoard({
               p.{page}
             </span>
           ))}
+          {supported && (
+            <button type="button" className="btn btn-ghost btn-sm ml-auto" onClick={listen}>
+              <Volume2 className="size-4" aria-hidden />
+              {speaking ? 'Reading...' : 'Listen'}
+            </button>
+          )}
+          <button
+            type="button"
+            className={`btn btn-primary btn-sm ${supported ? '' : 'ml-auto'}`}
+            onClick={() => setPresent(true)}
+          >
+            <Maximize2 className="size-4" aria-hidden />
+            Present
+          </button>
         </div>
         <h3 className="mt-2.5 text-[20px] font-semibold leading-tight tracking-[-0.02em]">{beat.title}</h3>
         <p className="mt-2 text-[14px] leading-relaxed text-text-muted">{beat.intro}</p>
@@ -231,6 +274,14 @@ export function LessonBoard({
           </p>
         )}
         {heatCheck(check)}
+        <div className="mt-3">
+          <SectionAsk
+            key={`ask-${index}`}
+            courseId={courseId}
+            sectionTitle={beat.title}
+            sectionText={beatText(beat)}
+          />
+        </div>
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
           <button type="button" className="btn btn-quiet btn-sm" onClick={() => go(index - 1)} disabled={index === 0}>
             <ChevronLeft className="size-3.5" aria-hidden />

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   makePractice,
   scoreWrittenAnswer,
@@ -31,9 +31,10 @@ function listTopics(db: DbDriver, courseId: string): Promise<{ id: string; title
 }
 
 /**
- * Practice screen (FR-064..FR-069): multiple choice with instant feedback,
- * then one written answer scored on the three-part rubric (correctness,
- * completeness, structure). Marking a topic done feeds the Progress screen.
+ * Practice screen (FR-064..FR-069): a set of multiple-choice questions that
+ * covers the whole topic with instant feedback, then a few written answers
+ * reserved for theory and derivations, scored on the three-part rubric
+ * (correctness, completeness, structure). Marking a topic done feeds Progress.
  */
 export function PracticePanel({ courseId }: { courseId: string }) {
   const prefs = usePrefs();
@@ -41,12 +42,12 @@ export function PracticePanel({ courseId }: { courseId: string }) {
   const [autoKnownNote, setAutoKnownNote] = useState('');
   const [topicId, setTopicId] = useState('');
   const [loading, setLoading] = useState(false);
-  const [mcq, setMcq] = useState<McqItem | null>(null);
-  const [written, setWritten] = useState<WrittenItem | null>(null);
-  const [choice, setChoice] = useState<number | null>(null);
-  const [writtenText, setWrittenText] = useState('');
-  const [score, setScore] = useState<WrittenScore | null>(null);
-  const [scoring, setScoring] = useState(false);
+  const [mcq, setMcq] = useState<McqItem[]>([]);
+  const [written, setWritten] = useState<WrittenItem[]>([]);
+  const [choices, setChoices] = useState<Record<number, number>>({});
+  const [writtenTexts, setWrittenTexts] = useState<Record<number, string>>({});
+  const [scores, setScores] = useState<Record<number, WrittenScore>>({});
+  const [scoringIndex, setScoringIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -58,14 +59,20 @@ export function PracticePanel({ courseId }: { courseId: string }) {
     })();
   }, [courseId]);
 
+  const resetAnswers = useCallback(() => {
+    setChoices({});
+    setWrittenTexts({});
+    setScores({});
+    setAutoKnownNote('');
+  }, []);
+
   const generate = useCallback(async () => {
     if (topicId === '' || loading) return;
     setLoading(true);
     setError('');
-    setMcq(null);
-    setWritten(null);
-    setScore(null);
-    setChoice(null);
+    setMcq([]);
+    setWritten([]);
+    resetAnswers();
     try {
       const db = await getDb();
       const config = await loadConfig();
@@ -74,36 +81,41 @@ export function PracticePanel({ courseId }: { courseId: string }) {
         return;
       }
       const practice = await makePractice(db.driver, courseId, topicId, loadConfig);
-      setMcq(practice.mcq[0] ?? null);
-      setWritten(practice.written[0] ?? null);
+      setMcq(practice.mcq);
+      setWritten(practice.written.slice(0, 3));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setLoading(false);
     }
-  }, [courseId, topicId, loading]);
+  }, [courseId, topicId, loading, resetAnswers]);
 
-  const submitWritten = useCallback(async () => {
-    if (written === null || writtenText.trim() === '' || scoring) return;
-    setScoring(true);
-    setError('');
-    try {
-      const score1 = await scoreWrittenAnswer(writtenText.trim(), written, loadConfig);
-      setScore(score1);
-      if (prefs.autoKnownOnStrongScore) {
-        const total = score1.correctness + score1.completeness + score1.structure;
-        if (total >= 5) {
-          const db = await getDb();
-          await setProgress(db.driver, courseId, topicId, 'known');
-          setAutoKnownNote('Strong score - this topic is now marked known.');
+  const scoreWritten = useCallback(
+    async (index: number) => {
+      const item = written[index];
+      const text = writtenTexts[index]?.trim() ?? '';
+      if (item === undefined || text === '' || scoringIndex !== null) return;
+      setScoringIndex(index);
+      setError('');
+      try {
+        const result = await scoreWrittenAnswer(text, item, loadConfig);
+        setScores((current) => ({ ...current, [index]: result }));
+        if (prefs.autoKnownOnStrongScore) {
+          const total = result.correctness + result.completeness + result.structure;
+          if (total >= 5) {
+            const db = await getDb();
+            await setProgress(db.driver, courseId, topicId, 'known');
+            setAutoKnownNote('Strong score - this topic is now marked known.');
+          }
         }
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      } finally {
+        setScoringIndex(null);
       }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setScoring(false);
-    }
-  }, [written, writtenText, scoring, prefs.autoKnownOnStrongScore, courseId, topicId]);
+    },
+    [written, writtenTexts, scoringIndex, prefs.autoKnownOnStrongScore, courseId, topicId],
+  );
 
   const markDone = useCallback(async () => {
     if (topicId === '') return;
@@ -111,13 +123,21 @@ export function PracticePanel({ courseId }: { courseId: string }) {
     await setProgress(db.driver, courseId, topicId, 'known');
   }, [courseId, topicId]);
 
+  const answered = Object.keys(choices).length;
+  const correct = useMemo(
+    () => mcq.filter((item, index) => choices[index] === item.correct).length,
+    [mcq, choices],
+  );
+  const total = mcq.length + written.length;
+  const done = answered + Object.keys(scores).length;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <select
           value={topicId}
           onChange={(event) => setTopicId(event.target.value)}
-          className="flex-1 rounded-[var(--radius)] border border-border bg-surface px-3 py-2 text-sm"
+          className="input flex-1"
         >
           {topics.length === 0 && <option value="">No topics yet</option>}
           {topics.map((topic) => (
@@ -129,98 +149,182 @@ export function PracticePanel({ courseId }: { courseId: string }) {
         <button
           onClick={() => void generate()}
           disabled={topicId === '' || loading}
-          className="rounded-[var(--radius)] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast hover:opacity-90 disabled:opacity-50"
+          className="btn btn-primary"
         >
           {loading ? 'Making...' : 'New practice set'}
         </button>
       </div>
 
       {error !== '' && <p className="rounded-[var(--radius)] border border-danger/40 bg-surface px-3 py-2 text-sm text-danger">{error}</p>}
-      {loading && <p className="text-sm text-text-muted" aria-live="polite">Building a question pair...</p>}
 
-      {mcq !== null && (
-        <section className="flex flex-col gap-2 rounded-[var(--radius)] border border-border bg-surface p-3">
-          <p className="text-xs text-text-muted">Multiple choice</p>
-          <Markdown content={mcq.prompt} compact className="font-medium" />
-          <div className="flex flex-col gap-1">
-            {mcq.options.map((option, index) => {
-              const chosen = choice === index;
-              const correct = index === mcq.correct;
-              const answered = choice !== null;
-              const style = answered && chosen
-                ? correct
-                  ? 'border border-known px-3 py-2 text-sm rounded-[var(--radius)]'
-                  : 'border border-danger px-3 py-2 text-sm rounded-[var(--radius)]'
-                : 'border border-border px-3 py-2 text-sm rounded-[var(--radius)] hover:border-accent';
+      {loading && (
+        <div className="rounded-[var(--radius)] border border-border bg-surface p-4" aria-live="polite">
+          <p className="text-sm text-text-muted">Writing a set of questions that covers the whole topic...</p>
+          <div className="mt-2">
+            <div className="deck-progress-track" role="progressbar" aria-label="Building practice set">
+              <div className="deck-progress-fill animate-pulse" style={{ width: '45%' }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mcq.length > 0 && (
+        <section className="flex flex-col gap-3" aria-label="Multiple choice questions">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="section-title">Multiple choice</p>
+            <p className="text-[13px] text-text-muted">
+              {answered} of {mcq.length} answered{answered > 0 ? ` · ${correct} correct` : ''}
+            </p>
+          </div>
+
+          <ol className="flex flex-col gap-3">
+            {mcq.map((item, questionIndex) => {
+              const choice = choices[questionIndex];
+              const answeredHere = choice !== undefined;
               return (
-                <button
-                  key={index}
-                  disabled={answered}
-                  onClick={() => setChoice(index)}
-                  className={`${style} text-left`}
+                <li
+                  key={questionIndex}
+                  className="rounded-[var(--radius)] border border-border bg-surface p-3.5"
                 >
-                  <Markdown content={option} compact inline />
-                  {answered && correct && <span className="ml-2 text-xs text-known">correct</span>}
-                </button>
+                  <div className="flex items-start gap-2.5">
+                    <span className="slide-nav-index mt-0.5 flex-none" aria-hidden>
+                      {questionIndex + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <Markdown content={item.prompt} className="font-medium" />
+                      <div className="mt-2 flex flex-col gap-1.5">
+                        {item.options.map((option, optionIndex) => {
+                          const chosen = choice === optionIndex;
+                          const isCorrect = optionIndex === item.correct;
+                          const style = answeredHere
+                            ? chosen
+                              ? isCorrect
+                                ? 'border-known bg-known/10'
+                                : 'border-danger bg-danger/10'
+                              : isCorrect
+                                ? 'border-known/60'
+                                : 'border-border'
+                            : 'border-border hover:border-accent';
+                          return (
+                            <button
+                              key={optionIndex}
+                              disabled={answeredHere}
+                              onClick={() =>
+                                setChoices((current) => ({ ...current, [questionIndex]: optionIndex }))
+                              }
+                              className={`flex items-start gap-2 rounded-[var(--radius)] border px-3 py-2 text-left text-[14px] transition-colors ${style}`}
+                            >
+                              <span className="num flex-none text-text-muted">
+                                {String.fromCharCode(65 + optionIndex)}.
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <Markdown content={option} compact inline />
+                              </span>
+                              {answeredHere && isCorrect && (
+                                <span className="flex-none text-[11.5px] font-medium text-known">correct</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {answeredHere && (
+                        <div className="mt-2 rounded-[var(--radius)] border border-border bg-bg p-2.5 text-[13.5px]">
+                          <p className={choice === item.correct ? 'text-known' : 'text-danger'}>
+                            {choice === item.correct ? 'Right.' : 'Not quite.'}
+                          </p>
+                          <Markdown content={item.explanation} compact className="mt-1 text-text-muted" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </li>
               );
             })}
+          </ol>
+        </section>
+      )}
+
+      {written.length > 0 && (
+        <section className="flex flex-col gap-3" aria-label="Written questions">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="section-title">Written answers</p>
+            <p className="text-[13px] text-text-muted">
+              {Object.keys(scores).length} of {written.length} scored
+            </p>
           </div>
-          {choice !== null && (
-            <div className="text-sm text-text-muted">
-              <p>{choice === mcq.correct ? 'Right.' : 'Not quite.'}</p>
-              <Markdown content={mcq.explanation} compact />
-            </div>
-          )}
-        </section>
-      )}
+          <p className="text-[12.5px] text-text-muted">
+            Only the answers an exam makes you write by hand. For a calculation, just state
+            the result and the key step - the checker verifies the maths.
+          </p>
 
-      {written !== null && (
-        <section className="flex flex-col gap-2 rounded-[var(--radius)] border border-border bg-surface p-3">
-          <p className="text-xs text-text-muted">Written answer</p>
-          <Markdown content={written.prompt} compact className="font-medium" />
-          <textarea
-            rows={4}
-            value={writtenText}
-            onChange={(event) => setWrittenText(event.target.value)}
-            placeholder="Write your answer..."
-            className="w-full rounded-[var(--radius)] border border-border bg-bg px-2 py-1 text-sm outline-none focus:border-accent"
-          />
-          <button
-            onClick={() => void submitWritten()}
-            disabled={scoring || writtenText.trim() === ''}
-            className="self-start rounded-[var(--radius)] bg-accent px-4 py-2 text-sm font-medium text-accent-contrast disabled:opacity-40"
-          >
-            {scoring ? 'Scoring...' : 'Score my answer'}
+          {written.map((item, index) => {
+            const score = scores[index];
+            const busy = scoringIndex === index;
+            return (
+              <article
+                key={index}
+                className="flex flex-col gap-2 rounded-[var(--radius)] border border-border bg-surface p-3.5"
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className="slide-nav-index mt-0.5 flex-none" aria-hidden>
+                    {index + 1}
+                  </span>
+                  <Markdown content={item.prompt} className="font-medium" />
+                </div>
+                <textarea
+                  rows={4}
+                  value={writtenTexts[index] ?? ''}
+                  onChange={(event) =>
+                    setWrittenTexts((current) => ({ ...current, [index]: event.target.value }))
+                  }
+                  placeholder="Write your answer, or just the final result for a calculation..."
+                  className="input min-h-[92px] resize-y"
+                />
+                <button
+                  onClick={() => void scoreWritten(index)}
+                  disabled={busy || (writtenTexts[index] ?? '').trim() === ''}
+                  className="btn btn-primary btn-sm self-start"
+                >
+                  {busy ? 'Checking...' : score === undefined ? 'Check my answer' : 'Check again'}
+                </button>
+                {score !== undefined && (
+                  <div className="rounded-[var(--radius)] border border-border bg-bg p-3 text-sm">
+                    <p className="font-medium">
+                      Score: {score.correctness + score.completeness + score.structure}/6
+                    </p>
+                    <ul className="mt-1 flex flex-col gap-0.5 text-[12.5px] text-text-muted">
+                      <li>Correctness {score.correctness}/2</li>
+                      <li>Completeness {score.completeness}/2</li>
+                      <li>Structure {score.structure}/2</li>
+                    </ul>
+                    <Markdown content={score.feedback} compact className="mt-2" />
+                    <details className="mt-2 text-[13px] text-text-muted">
+                      <summary className="cursor-pointer select-none">Model answer</summary>
+                      <Markdown content={item.modelAnswer} compact className="mt-1 text-text" />
+                    </details>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+
+          {autoKnownNote !== '' && <p className="text-[12.5px] text-known">{autoKnownNote}</p>}
+          <button onClick={() => void markDone()} className="btn btn-ghost btn-sm self-start">
+            I am done with this topic (mark known)
           </button>
-          {score !== null && (
-            <div className="rounded-[var(--radius)] border border-border bg-bg p-3 text-sm">
-              <p className="font-medium">
-                Score: {score.correctness + score.completeness + score.structure}/6
-              </p>
-              <ul className="mt-1 flex flex-col gap-1 text-xs text-text-muted">
-                <li>Correctness {score.correctness}/2</li>
-                <li>Completeness {score.completeness}/2</li>
-                <li>Structure {score.structure}/2</li>
-              </ul>
-              <Markdown content={score.feedback} compact className="mt-2" />
-              {autoKnownNote !== '' && <p className="mt-2 text-xs text-known">{autoKnownNote}</p>}
-            </div>
-          )}
-          {choice !== null && score !== null && (
-            <button
-              onClick={() => void markDone()}
-              className="self-start rounded-[var(--radius)] border border-known px-3 py-1.5 text-xs text-known hover:opacity-90"
-            >
-              I am done with this topic (mark known)
-            </button>
-          )}
         </section>
       )}
 
-      {mcq === null && written === null && !loading && error === '' && (
+      {total > 0 && (
+        <p className="text-[12.5px] text-text-muted" aria-live="polite">
+          {done} of {total} parts answered.
+        </p>
+      )}
+
+      {total === 0 && !loading && error === '' && (
         <p className="rounded-[var(--radius)] border border-border bg-surface p-4 text-sm text-text-muted">
-          Pick a topic and press New practice set. The written part is returned
-          with a suggested model answer after scoring.
+          Pick a topic and press New practice set. You get a run of multiple-choice
+          questions across the whole topic, then a few written answers for the theory.
         </p>
       )}
     </div>

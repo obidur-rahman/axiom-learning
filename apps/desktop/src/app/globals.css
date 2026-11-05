@@ -271,6 +271,12 @@
   --radius-card: 7px;
 }
 
+html {
+  /* A readable base: every rem-based size (Tailwind's text-sm, spacing) grows
+     with it, so nothing on a large screen is squint-small. */
+  font-size: 16.5px;
+}
+
 body {
   min-height: 100vh;
   background-color: var(--color-bg);
@@ -280,8 +286,8 @@ body {
     radial-gradient(58% 50% at 58% 112%, var(--ambient-3), transparent 66%);
   background-attachment: fixed;
   color: var(--color-text);
-  font-size: 15.5px;
-  line-height: 1.55;
+  font-size: 16px;
+  line-height: 1.58;
   letter-spacing: -0.005em;
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
@@ -694,8 +700,8 @@ body {
 
 /* ---------- Rendered lesson / tutor Markdown ---------- */
 .markdown {
-  font-size: 15.5px;
-  line-height: 1.7;
+  font-size: 16px;
+  line-height: 1.72;
   overflow-wrap: anywhere;
 }
 .markdown > :first-child { margin-top: 0; }
@@ -1306,3 +1312,74 @@ html[data-reduce-motion='true'] *::after {
 [data-reduce-motion='true'] [data-slot='progress'][data-indeterminate='true'] [data-slot='progress-indicator'] {
   animation: none;
 }
+/* ---------- Native controls in both themes ---------- */
+/* Windows renders a native dropdown; without an explicit scheme the popup
+   stays white while the app text is white, so the options are unreadable. */
+select { color-scheme: light; }
+[data-theme='dark'] select { color-scheme: dark; }
+
+select:not(.input):not([data-slot]) {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background-color: var(--color-panel-raised-solid);
+  padding: 7px 10px;
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+select option,
+select optgroup {
+  background-color: var(--color-panel-solid);
+  color: var(--color-text);
+}
+
+/* ---------- Read-all lesson formatting ---------- */
+/* A saved lesson is mostly H2 sections: give each one room so the page reads
+   as chapters instead of one dense block. */
+.markdown > h2 {
+  margin-top: 2.1rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.markdown > h3 { margin-top: 1.5rem; }
+.markdown > h2 + p,
+.markdown > h3 + p { margin-top: 0.55rem; }
+.markdown p { margin: 0.75rem 0; }
+.markdown ul,
+.markdown ol { margin: 0.75rem 0; }
+.markdown li { margin: 0.35rem 0; }
+.markdown li > p { margin: 0.25rem 0; }
+.markdown hr { margin: 2rem 0; border-top-color: var(--color-border-strong); }
+.markdown table { margin: 1rem 0; font-size: 0.94rem; }
+.markdown tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+.markdown blockquote {
+  margin: 1.1rem 0;
+  padding: 0.85rem 1rem;
+}
+.markdown .katex-display { margin: 1.1rem 0; }
+.markdown-compact { font-size: 14.5px; }
+
+/* ---------- Presented lesson ---------- */
+.lesson-stage[data-present='true'] {
+  padding: clamp(24px, 4vw, 56px);
+}
+.lesson-stage[data-present='true'] > * {
+  width: min(100%, 1180px);
+  margin-inline: auto;
+}
+.lesson-stage[data-present='true'] .slide-title {
+  font-size: clamp(30px, 3.1vw, 46px);
+}
+.lesson-stage[data-present='true'] .slide-body .markdown {
+  font-size: 19px;
+  line-height: 1.72;
+}
+
+/* Compact surfaces (chat bubbles, answer panels) keep their tight rhythm. */
+.markdown-compact p { margin: 0.4rem 0; }
+.markdown-compact ul,
+.markdown-compact ol { margin: 0.4rem 0; }
+.markdown-compact li { margin: 0.15rem 0; }
+.markdown-compact table { margin: 0.5rem 0; }

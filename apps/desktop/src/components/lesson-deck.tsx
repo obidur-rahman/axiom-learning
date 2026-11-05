@@ -1,9 +1,21 @@
 'use client';
 
-import { useCallback, useState } from 'react';
-import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  Pause,
+  Play,
+  Sparkles,
+  Volume2,
+} from 'lucide-react';
 import type { LessonCheckQuestion, LessonSlide, LessonSlideKind } from '../lib/lesson-content';
+import { usePrefs } from '../lib/prefs';
+import { toSpeechText, useSpeech } from '../lib/speech';
 import { Markdown } from './markdown';
+import { SectionAsk } from './section-ask';
 
 const KIND_LABEL: Record<LessonSlideKind, string> = {
   concept: 'Concept',
@@ -14,6 +26,7 @@ const KIND_LABEL: Record<LessonSlideKind, string> = {
 };
 
 interface LessonDeckProps {
+  courseId: string;
   title: string;
   slides: LessonSlide[];
   questions: LessonCheckQuestion[];
@@ -24,6 +37,7 @@ interface LessonDeckProps {
 }
 
 export function LessonDeck({
+  courseId,
   title,
   slides,
   questions,
@@ -32,15 +46,80 @@ export function LessonDeck({
   shown,
   onShowAnswer,
 }: LessonDeckProps) {
+  const prefs = usePrefs();
   const [index, setIndex] = useState(0);
   const [present, setPresent] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const { speaking, supported, speak, stop } = useSpeech();
+  const playToken = useRef(0);
   const total = slides.length + (questions.length > 0 ? 1 : 0);
   const isQuiz = index >= slides.length;
   const slide = isQuiz ? undefined : slides[index];
 
+  const narrationFor = useCallback(
+    (at: number): string => {
+      const learner = prefs.displayName.trim();
+      if (at >= slides.length) {
+        return [
+          'Check yourself.',
+          'Answer each question without looking, then reveal the model answer.',
+          ...questions.map((question, questionIndex) => `Question ${questionIndex + 1}. ${question.prompt}`),
+        ].join(' ');
+      }
+      const entry = slides[at];
+      if (entry === undefined) return '';
+      const opening = at === 0 && learner !== '' ? `Welcome, ${learner}. This lesson is ${title}.` : '';
+      return [opening, entry.title, toSpeechText(entry.markdown), entry.takeaway ?? '']
+        .filter((part) => part !== '')
+        .join('. ');
+    },
+    [prefs.displayName, questions, slides, title],
+  );
+
+  const narrateAt = useCallback<(at: number, autoAdvance: boolean) => void>(
+    (at, autoAdvance) => {
+      const token = ++playToken.current;
+      speak(narrationFor(at), () => {
+        if (playToken.current !== token) return;
+        if (!autoAdvance) return;
+        if (at + 1 < total) {
+          setIndex(at + 1);
+          narrateAt(at + 1, true);
+        } else {
+          setPlaying(false);
+        }
+      });
+    },
+    [narrationFor, speak, total],
+  );
+
+  const stopPlaying = useCallback(() => {
+    playToken.current += 1;
+    setPlaying(false);
+    stop();
+  }, [stop]);
+
+  const togglePlay = useCallback(() => {
+    if (playing) {
+      stopPlaying();
+      return;
+    }
+    setPlaying(true);
+    narrateAt(index, true);
+  }, [playing, stopPlaying, narrateAt, index]);
+
+  // Leaving the deck must not keep a voice running.
+  useEffect(() => () => {
+    playToken.current += 1;
+    stop();
+  }, [stop]);
+
   const goTo = useCallback(
-    (next: number) => setIndex(Math.max(0, Math.min(total - 1, next))),
-    [total],
+    (next: number) => {
+      stopPlaying();
+      setIndex(Math.max(0, Math.min(total - 1, next)));
+    },
+    [total, stopPlaying],
   );
 
   const onKeyDown = useCallback(
@@ -107,24 +186,86 @@ export function LessonDeck({
           tabIndex={0}
           onKeyDown={onKeyDown}
         >
-          <div className="flex items-start justify-between gap-3">
+          {present && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
+              <p className="text-[15px] font-medium">{title}</p>
+              <div className="flex items-center gap-1.5">
+                {supported && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={togglePlay}>
+                    {playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
+                    {playing ? 'Pause' : 'Listen'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => goTo(index - 1)}
+                  disabled={index === 0}
+                  className="btn btn-ghost btn-sm"
+                  aria-label="Previous slide"
+                >
+                  <ChevronLeft className="size-4" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goTo(index + 1)}
+                  disabled={index >= total - 1}
+                  className="btn btn-ghost btn-sm"
+                  aria-label="Next slide"
+                >
+                  <ChevronRight className="size-4" aria-hidden />
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPresent(false)}>
+                  <Minimize2 className="size-4" aria-hidden />
+                  Exit
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="slide-kind">{isQuiz ? 'Check yourself' : KIND_LABEL[slide?.kind ?? 'concept']}</span>
-            <button
-              type="button"
-              onClick={() => setPresent((value) => !value)}
-              className="btn btn-quiet btn-sm -mt-1 -mr-1"
-              aria-pressed={present}
-              title={present ? 'Exit presentation (Esc)' : 'Present this slide'}
-            >
-              {present ? <Minimize2 className="size-3.5" aria-hidden /> : <Maximize2 className="size-3.5" aria-hidden />}
-              <span className="hidden sm:inline">{present ? 'Exit' : 'Present'}</span>
-            </button>
+            {!present && (
+              <div className="flex items-center gap-1.5">
+                {supported && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => narrateAt(index, false)}
+                      className="btn btn-ghost btn-sm"
+                      title="Read this slide aloud"
+                    >
+                      <Volume2 className="size-4" aria-hidden />
+                      <span className="hidden sm:inline">{speaking ? 'Replay' : 'Listen'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={togglePlay}
+                      className="btn btn-ghost btn-sm"
+                      title="Narrate the whole lesson and advance the slides"
+                    >
+                      {playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
+                      <span className="hidden sm:inline">{playing ? 'Pause' : 'Play lesson'}</span>
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPresent((value) => !value)}
+                  className="btn btn-primary"
+                  aria-pressed={present}
+                  title="Present this lesson full screen"
+                >
+                  <Maximize2 className="size-4" aria-hidden />
+                  Present
+                </button>
+              </div>
+            )}
           </div>
 
           {isQuiz ? (
             <>
               <h2 className="slide-title">Check yourself</h2>
-              <p className="mt-2 max-w-[64ch] text-[14.5px] leading-relaxed text-text-muted">
+              <p className="mt-2 max-w-[64ch] text-[15px] leading-relaxed text-text-muted">
                 Answer without looking, then reveal each model answer. If you can do all three, mark the topic known
                 in Progress.
               </p>
@@ -155,7 +296,7 @@ export function LessonDeck({
                         <button
                           type="button"
                           onClick={() => onShowAnswer(questionIndex)}
-                          className="mt-2 text-[12.5px] font-medium text-accent underline-offset-4 hover:underline"
+                          className="mt-2 text-[13px] font-medium text-accent underline-offset-4 hover:underline"
                         >
                           {shown.includes(questionIndex) ? 'Answer shown' : 'Show answer'}
                         </button>
@@ -178,6 +319,16 @@ export function LessonDeck({
                   <span className="font-semibold text-accent">Key idea</span> · {slide.takeaway}
                 </p>
               )}
+              {!present && slide !== undefined && (
+                <div className="mt-3">
+                  <SectionAsk
+                    key={`ask-${index}`}
+                    courseId={courseId}
+                    sectionTitle={slide.title}
+                    sectionText={slide.markdown}
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -193,7 +344,7 @@ export function LessonDeck({
             </button>
 
             <div className="deck-progress">
-              <span className="num whitespace-nowrap text-[12.5px] text-text-muted">
+              <span className="num whitespace-nowrap text-[13px] text-text-muted">
                 {index + 1} / {total}
               </span>
               <div
@@ -222,7 +373,7 @@ export function LessonDeck({
             </button>
           </div>
 
-          <p className="mt-2 text-center text-[12px] text-text-muted">
+          <p className="mt-2 text-center text-[12.5px] text-text-muted">
             <Sparkles className="mr-1 inline size-3 align-[-1px]" aria-hidden />
             Use the arrow keys to move through the lesson.
           </p>

@@ -5,6 +5,7 @@ import { streamTutorAnswer, type TutorMessage } from '@axiom/pipeline';
 import { getDb } from '../lib/db';
 import { loadConfig } from '../lib/provider';
 import { loadPrefs, usePrefs } from '../lib/prefs';
+import { clearTutorHistory, loadTutorHistory, saveTutorHistory } from '../lib/tutor-history';
 import { Markdown } from './markdown';
 
 /**
@@ -25,11 +26,13 @@ export function TutorPanel({ courseId }: { courseId: string }) {
   const thread = useRef<TutorMessage[]>([]);
 
   useEffect(() => {
-    setMessages([]);
+    // Restore the saved thread: switching tabs or restarting must not lose it.
+    const saved = loadTutorHistory(courseId);
+    thread.current = saved;
+    setMessages(saved);
     setStreamText('');
     setFailureCount(0);
     setGuideMode(loadPrefs().tutorGuideDefault);
-    thread.current = [];
   }, [courseId]);
 
   const send = useCallback(async () => {
@@ -67,6 +70,7 @@ export function TutorPanel({ courseId }: { courseId: string }) {
             { role: 'assistant', content: accumulated, citations } as TutorMessage,
           ];
           setMessages([...thread.current]);
+          saveTutorHistory(courseId, thread.current);
           setStreamText('');
           setStreaming(false);
         },
@@ -81,17 +85,32 @@ export function TutorPanel({ courseId }: { courseId: string }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <label className="flex items-center gap-2 text-sm text-text-muted">
-        <input
-          type="checkbox"
-          checked={guideMode}
-          onChange={(event) => setGuideMode(event.target.checked)}
-          className="accent-[var(--color-accent)]"
-        />
-        Guide me first (ask guiding questions back)
-      </label>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label className="flex items-center gap-2 text-sm text-text-muted">
+          <input
+            type="checkbox"
+            checked={guideMode}
+            onChange={(event) => setGuideMode(event.target.checked)}
+            className="accent-[var(--color-accent)]"
+          />
+          Guide me first (ask guiding questions back)
+        </label>
+        {messages.length > 0 && (
+          <button
+            type="button"
+            className="btn btn-quiet btn-sm"
+            onClick={() => {
+              thread.current = [];
+              setMessages([]);
+              clearTutorHistory(courseId);
+            }}
+          >
+            New chat
+          </button>
+        )}
+      </div>
 
-      <div className="flex max-h-[420px] min-h-[160px] flex-col gap-2 overflow-y-auto rounded-[var(--radius)] border border-border bg-surface p-3">
+      <div className="flex max-h-[62vh] min-h-[220px] flex-col gap-2 overflow-y-auto rounded-[var(--radius)] border border-border bg-surface p-3">
         {messages.length === 0 && streamText === '' && (
           <p className="text-sm text-text-muted">
             Ask anything from this course. Answers only use your material pages

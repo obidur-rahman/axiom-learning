@@ -95,11 +95,6 @@ function byTopic(topicIds: string[], topics: PlanTopic[]): string | null {
   return candidates[0] ?? null;
 }
 
-function addItem(items: StudyItem[], item: StudyItem): void {
-  const id = `${item.kind}:${item.refId}:${items.length}`;
-  items.push({ ...item, id });
-}
-
 function weakTopicOrder(topics: PlanTopic[], attempts: PlanAttempt[]): string[] {
   const weakness = new Map<string, number>();
   for (const attempt of attempts) {
@@ -324,7 +319,10 @@ export function buildStudyPlan(input: StudyPlanInput): StudyPlan {
     return true;
   });
 
-  const { items, backlog } = timebox(deduped, input.dailyMinutes);
+  // Items are built without ids while the queue is assembled; give each one a
+  // stable, unique id so React lists and attempt records can rely on it.
+  const withIds = deduped.map((item, index) => ({ ...item, id: `${item.kind}:${item.refId}:${index}` }));
+  const { items, backlog } = timebox(withIds, input.dailyMinutes);
   const pastTotal = past.length;
   const pastDone = past.filter((question) => attempted.has(question.id)).length;
 

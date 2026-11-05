@@ -93,7 +93,7 @@ export function Markdown({ content, className, compact = false, inline = false }
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: false }]]}
+        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore', trust: false }]]}
         components={components}
       >
         {normalizeMathDelimiters(content)}
@@ -103,18 +103,54 @@ export function Markdown({ content, className, compact = false, inline = false }
 }
 
 /**
- * Some local models emit LaTeX with \( \) and \[ \] instead of dollar signs.
- * remark-math only understands dollars, so convert the delimiters while
- * leaving fenced code and inline code untouched.
+ * Models do not always emit the dollar delimiters remark-math understands.
+ * This turns every common form into dollars while leaving code untouched:
+ *   \[ ... \]        -> $$ ... $$
+ *   \( ... \)        -> $ ... $
+ *   \begin{align}... -> $$ ... $$
+ *   $math
+ *   over two lines$ -> $$ ... $$ (single dollars cannot span lines)
+ * Emphasis that leaked inside math is dropped so KaTeX gets clean source.
  */
 export function normalizeMathDelimiters(markdown: string): string {
   return markdown
     .split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g)
     .map((part, index) => {
       if (index % 2 === 1) return part;
-      return part
-        .replace(/\\\[([\s\S]+?)\\\]/g, (_match, expression: string) => `$$\n${expression.trim()}\n$$`)
-        .replace(/\\\(([\s\S]+?)\\\)/g, (_match, expression: string) => `$${expression.trim()}$`);
+      return cleanMathPart(part);
     })
     .join('');
+}
+
+/** A whole top-level LaTeX environment, nested inner environments included. */
+const ENVIRONMENT_BLOCK =
+  /\\begin\{(align\*?|aligned|alignat\*?|equation\*?|gather\*?|eqnarray\*?|multline\*?|cases|array|matrix|pmatrix|bmatrix|vmatrix)\}[\s\S]*?\\end\{\1\}/g;
+
+function insideDisplayMath(text: string, offset: number): boolean {
+  return (text.slice(0, offset).match(/\$\$/g) ?? []).length % 2 === 1;
+}
+
+function cleanMathPart(part: string): string {
+  let text = part
+    .replace(/\\\[([\s\S]+?)\\\]/g, (_match, expression: string) => `\n$$\n${expression.trim()}\n$$\n`)
+    .replace(/\\\(([\s\S]+?)\\\)/g, (_match, expression: string) => `$${expression.trim()}$`);
+
+  // KaTeX only renders align/equation and friends inside display math.
+  text = text.replace(ENVIRONMENT_BLOCK, (match: string, _name: string, offset: number) =>
+    insideDisplayMath(text, offset) ? match : `\n$$\n${match}\n$$\n`,
+  );
+
+  // Single dollars cannot span lines (or hold a blank line): promote them.
+  text = text.replace(/(?<!\$)\$(?!\$)([^$]+?)\$(?!\$)/g, (match, body: string) => {
+    if (!body.includes('\n')) return match;
+    return /\\[a-zA-Z]|\^|_|\{|=/.test(body) ? `\n$$\n${body.trim()}\n$$\n` : match;
+  });
+
+  // `**x**` inside math is Markdown emphasis that leaked into LaTeX.
+  text = text.replace(/\$\$([\s\S]*?)\$\$|\$([^$\n]+?)\$/g, (match, display?: string, inline?: string) => {
+    const body = (display ?? inline ?? '').replace(/\*\*/g, '');
+    return display !== undefined ? `$$${body}$$` : `$${body}$`;
+  });
+
+  return text;
 }

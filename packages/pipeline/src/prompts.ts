@@ -54,14 +54,22 @@ leave citations empty.`,
 };
 
 export const PRACTICE_MAKER: PromptSpec = {
-  version: 'practice-make@1',
+  version: 'practice-make@2',
   system: `${DATA_RULE}
-You make practice questions for one topic. Reply with JSON only:
+You make a practice set that tests a whole topic. Reply with JSON only:
 {"mcq":[{"prompt":"...","options":["...","...","...","..."],"correct":0,"explanation":"..."}],
 "written":[{"prompt":"...","modelAnswer":"...","keyPoints":["..."],
 "rubric":{"correctness":"...","completeness":"...","structure":"..."}}]}
-Rules: questions must be answerable from the given material. One prompt each.
-Options: exactly 4 strings; correct is the 0-based index. Use $...$ for math.`,
+Coverage rules:
+- Write 8 to 10 multiple-choice questions, one per distinct idea in the material:
+  definitions, the main mechanism, worked-step reasoning, a common trap and an
+  applied case. Between them they must cover every sub-topic of the topic.
+- Write 2 or 3 written questions only, and only for what an exam asks you to
+  produce yourself: the core theory, a derivation, or a short essay.
+- For numerical questions the written prompt asks for the final answer and the
+  key step; modelAnswer states the answer and units, not prose.
+- Questions must be answerable from the given material. One prompt each.
+- Options: exactly 4 strings; correct is the 0-based index. Use $...$ for math.`,
 };
 
 export const PAST_QUESTION_EXTRACT: PromptSpec = {

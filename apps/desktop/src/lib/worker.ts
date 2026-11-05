@@ -47,6 +47,16 @@ async function requireCourse(driver: DbDriver, courseId: string): Promise<Course
 }
 
 async function runJob(job: JobRow, db: AxiomDb, driver: DbDriver): Promise<void> {
+  let failure: string | null = null;
+  const report = (percent: number, message: string) =>
+    emitAppEvent({
+      kind: 'job-progress',
+      jobId: job.id,
+      courseId: job.courseId ?? '',
+      jobKind: job.jobType,
+      percent,
+      message,
+    });
   try {
     if (job.courseId === null) {
       throw new Error(`job ${job.id} has no course`);
@@ -80,7 +90,7 @@ async function runJob(job: JobRow, db: AxiomDb, driver: DbDriver): Promise<void>
       const ctx: RunContext = { db, course, config: loadConfig };
       let lessonId: string | null = null;
       try {
-        const result = await buildTeachingLesson(ctx, topicId, { depth });
+        const result = await buildTeachingLesson(ctx, topicId, { depth, onProgress: report });
         lessonId = result.lessonId;
       } catch {
         // Teaching board failed: keep the older Markdown lesson working.
@@ -110,8 +120,8 @@ async function runJob(job: JobRow, db: AxiomDb, driver: DbDriver): Promise<void>
       await complete(driver, job.id);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await fail(driver, job.id, message);
+    failure = error instanceof Error ? error.message : String(error);
+    await fail(driver, job.id, failure);
   }
   const status = await driver
     .select<{ status: string }>('SELECT status FROM jobs WHERE id = $1', [job.id])
@@ -122,6 +132,7 @@ async function runJob(job: JobRow, db: AxiomDb, driver: DbDriver): Promise<void>
     courseId: job.courseId ?? '',
     jobKind: job.jobType,
     status,
+    ...(failure === null ? {} : { error: failure }),
   });
 }
 

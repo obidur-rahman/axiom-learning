@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   enqueue,
   flagLesson,
@@ -18,6 +19,7 @@ import { loadPrefs, usePrefs } from '../lib/prefs';
 import { LessonBoard } from './lesson-board';
 import { LessonDeck } from './lesson-deck';
 import { Markdown } from './markdown';
+import { ProgressBar } from './progress-bar';
 
 /** One topic option in the lesson picker. */
 interface TopicOption {
@@ -62,7 +64,10 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
   const [shown, setShown] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [progress, setProgress] = useState<{ percent: number; message: string } | null>(null);
   const [view, setView] = useState<'board' | 'slides' | 'read'>('board');
+  const params = useSearchParams();
+  const requestedTopic = params.get('topic');
 
   const loadLesson = useCallback(async (target: string, forDepth: string) => {
     if (target === '') return;
@@ -80,11 +85,14 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
       const db = await getDb();
       const options = await listTopics(db.driver, courseId);
       setTopics(options);
-      const first = options[0]?.id ?? '';
+      const first =
+        (requestedTopic !== null && options.some((topic) => topic.id === requestedTopic)
+          ? requestedTopic
+          : options[0]?.id) ?? '';
       setTopicId(first);
       await loadLesson(first, initialDepth);
     })();
-  }, [courseId, loadLesson]);
+  }, [courseId, loadLesson, requestedTopic]);
 
   useEffect(() => {
     setView(loadPrefs().lessonFormat === 'read' ? 'read' : loadPrefs().lessonFormat === 'slides' ? 'slides' : 'board');
@@ -98,13 +106,23 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
         if (event.kind === 'lesson-ready' && event.courseId === courseId && event.topicId === topicId) {
           void loadLesson(topicId, depth);
         }
+        if (
+          event.kind === 'job-progress' &&
+          event.jobKind === 'build_lesson' &&
+          event.courseId === courseId
+        ) {
+          setProgress({ percent: event.percent, message: event.message });
+        }
         if (event.kind === 'job-updated' && event.jobKind === 'build_lesson') {
           if (event.status === 'failed') {
             setMessage(`Lesson failed: ${event.error ?? 'unknown error'}`);
+            setProgress(null);
           } else if (event.status === 'done') {
             setMessage('');
+            setProgress(null);
           } else if (event.status === 'running') {
             setMessage('Building the lesson...');
+            setProgress({ percent: 2, message: 'Starting the lesson build' });
           }
           setBusy(false);
         }
@@ -201,6 +219,19 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
         </button>
       </div>
 
+      {progress !== null && (
+        <div className="rounded-[var(--radius)] border border-border bg-surface p-3.5" aria-live="polite">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[13.5px] font-medium">{progress.message}...</p>
+            <span className="num text-[12.5px] text-text-muted">{progress.percent}%</span>
+          </div>
+          <ProgressBar label={progress.message} value={progress.percent} className="mt-2" />
+          <p className="mt-2 text-[12.5px] text-text-muted">
+            You can switch tabs while this runs - the lesson keeps building in the background.
+          </p>
+        </div>
+      )}
+
       {message !== '' && (
         <p className="text-[13px] text-text-muted" aria-live="polite">
           {message}
@@ -269,10 +300,17 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
           </div>
 
           {view === 'board' && document !== null ? (
-            <LessonBoard key={lesson.id} document={document} onRegenerate={() => void generate()} busy={busy} />
+            <LessonBoard
+              key={lesson.id}
+              courseId={courseId}
+              document={document}
+              onRegenerate={() => void generate()}
+              busy={busy}
+            />
           ) : view === 'slides' ? (
             <LessonDeck
               key={lesson.id}
+              courseId={courseId}
               title={activeTopic?.title ?? parsed.title}
               slides={slides}
               questions={questions}

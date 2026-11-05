@@ -103,6 +103,8 @@ const MAX_PAGE_CHARS = 6_000;
 
 export interface TeachOptions {
   depth?: 'core' | 'bridge';
+  /** Reported per build stage so the UI can show real progress. */
+  onProgress?: (percent: number, message: string) => void;
 }
 
 interface LessonInput {
@@ -313,10 +315,13 @@ export async function buildTeachingLesson(
   options: TeachOptions = {},
 ): Promise<{ lessonId: string; document: LessonDocument }> {
   const depth = options.depth ?? 'core';
+  const report = options.onProgress ?? (() => {});
+  report(5, 'Reading the material for this topic');
   const input = await lessonInput(ctx, topicId, depth);
   if (input.pages.length === 0) {
     throw new Error('No material pages to ground the lesson. Read material first.');
   }
+  report(12, 'Planning the lesson objective');
 
   let objective = `Explain ${input.topicTitle} and apply it to an exam question.`;
   let why = '';
@@ -335,7 +340,12 @@ export async function buildTeachingLesson(
   }
 
   const beats: LessonBeat[] = [];
-  for (const kind of beatSkeleton(depth)) {
+  const skeleton = beatSkeleton(depth);
+  for (const [beatIndex, kind] of skeleton.entries()) {
+    report(
+      18 + Math.round((beatIndex / Math.max(1, skeleton.length)) * 72),
+      `Writing beat ${beatIndex + 1} of ${skeleton.length}`,
+    );
     let beat: LessonBeat;
     try {
       beat = await writeBeat(ctx, input, objective, kind, '');
@@ -363,6 +373,7 @@ export async function buildTeachingLesson(
     .map((beat) => beat.check)
     .filter((check): check is { prompt: string; answer: string } => check !== null)
     .slice(0, 3);
+  report(94, 'Saving the lesson');
   const citations = [...new Set(beats.flatMap((beat) => beat.citationPages))].sort((a, b) => a - b);
   const document: LessonDocument = {
     version: 2,

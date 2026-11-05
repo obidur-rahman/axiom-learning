@@ -2,6 +2,15 @@
 
 export type AppEvent =
   | { kind: 'job-updated'; jobId: string; courseId: string; jobKind: string; status: string; error?: string }
+  | {
+      kind: 'job-progress';
+      jobId: string;
+      courseId: string;
+      jobKind: string;
+      /** 0..100 for the current job. */
+      percent: number;
+      message: string;
+    }
   | { kind: 'lesson-ready'; courseId: string; topicId: string; lessonId: string }
   | { kind: 'worker-tick'; at: number };
 

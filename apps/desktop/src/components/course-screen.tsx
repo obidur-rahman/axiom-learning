@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getCourse, type Course } from '@axiom/data';
 import { UploadPanel } from './upload-panel';
 import { StudyPanel } from './study-panel';
@@ -43,6 +43,7 @@ export function CourseScreen() {
 
 function CourseTabs() {
   const params = useSearchParams();
+  const router = useRouter();
   const courseId = params.get('id') ?? '';
   const [course, setCourse] = useState<Course | null>(null);
   const [missing, setMissing] = useState(false);
@@ -51,12 +52,19 @@ function CourseTabs() {
     return TABS.some((entry) => entry.kind === requested) ? (requested as CourseTab) : 'material';
   });
 
-  // No ?tab in the link: land on the tab chosen in Settings.
+  // The URL is the source of truth: links from Study, dashboard and lessons
+  // must land on the tab they name, even when this screen is already open.
   useEffect(() => {
-    if (params.get('tab') !== null) return;
+    const requested = params.get('tab');
+    if (requested !== null) {
+      if (requested !== tab && TABS.some((entry) => entry.kind === requested)) {
+        setTab(requested as CourseTab);
+      }
+      return;
+    }
     const preferred = loadPrefs().defaultCourseTab;
-    if (TABS.some((entry) => entry.kind === preferred)) setTab(preferred);
-  }, [params]);
+    if (tab === 'material' && TABS.some((entry) => entry.kind === preferred)) setTab(preferred);
+  }, [params, tab]);
 
   const load = useCallback(async () => {
     if (courseId === '') {
@@ -120,7 +128,18 @@ function CourseTabs() {
         </p>
       </header>
 
-      <Tabs value={tab} onValueChange={(value) => setTab(value as CourseTab)}>
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          const next = value as CourseTab;
+          setTab(next);
+          // Keep the URL in step with the visible tab, so a later link to this
+          // screen can always tell which tab it is coming from.
+          const query = new URLSearchParams(params.toString());
+          query.set('tab', next);
+          router.replace(`/course?${query.toString()}`, { scroll: false });
+        }}
+      >
         <TabsList aria-label="Course sections" className="w-full justify-start overflow-x-auto">
           {TABS.map((entry) => (
             <TabsTrigger key={entry.kind} value={entry.kind} className="flex-none px-3.5 text-[13px]">
@@ -128,28 +147,30 @@ function CourseTabs() {
             </TabsTrigger>
           ))}
         </TabsList>
-        <TabsContent value="material" className="mt-3">
+        {/* keepMounted: a running lesson, a tutor thread and a practice set
+            survive a trip to another tab and come back exactly as they were. */}
+        <TabsContent value="material" keepMounted className="mt-3">
           <div className="card p-5"><UploadPanel courseId={courseId} /></div>
         </TabsContent>
-        <TabsContent value="study" className="mt-3">
+        <TabsContent value="study" keepMounted className="mt-3">
           <div className="card p-4 sm:p-5"><StudyPanel courseId={courseId} examDate={course.examDate} /></div>
         </TabsContent>
-        <TabsContent value="topics" className="mt-3">
+        <TabsContent value="topics" keepMounted className="mt-3">
           <div className="card p-5"><TopicsPanel courseId={courseId} /></div>
         </TabsContent>
-        <TabsContent value="roadmap" className="mt-3">
+        <TabsContent value="roadmap" keepMounted className="mt-3">
           <div className="card p-5"><RoadmapPanel courseId={courseId} /></div>
         </TabsContent>
-        <TabsContent value="lessons" className="mt-3">
+        <TabsContent value="lessons" keepMounted className="mt-3">
           <div className="card p-4 sm:p-5"><LessonsPanel courseId={courseId} /></div>
         </TabsContent>
-        <TabsContent value="tutor" className="mt-3">
+        <TabsContent value="tutor" keepMounted className="mt-3">
           <div className="card p-5"><TutorPanel courseId={courseId} /></div>
         </TabsContent>
-        <TabsContent value="practice" className="mt-3">
+        <TabsContent value="practice" keepMounted className="mt-3">
           <div className="card p-5"><PracticePanel courseId={courseId} /></div>
         </TabsContent>
-        <TabsContent value="progress" className="mt-3">
+        <TabsContent value="progress" keepMounted className="mt-3">
           <div className="card p-5"><ProgressPanel courseId={courseId} /></div>
         </TabsContent>
       </Tabs>

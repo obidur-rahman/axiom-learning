@@ -417,7 +417,10 @@ export function StudyPanel({ courseId, examDate }: { courseId: string; examDate:
                   <p className="mt-0.5 text-[12px] text-text-muted">{item.reason}</p>
                 </div>
                 {item.kind === 'lesson' ? (
-                  <Link href={`/course?id=${courseId}&tab=lessons`} className="btn btn-ghost btn-sm shrink-0">
+                  <Link
+                    href={`/course?id=${courseId}&tab=lessons&topic=${item.topicId ?? ''}`}
+                    className="btn btn-ghost btn-sm shrink-0"
+                  >
                     <BookOpen className="size-3.5" aria-hidden />
                     Open lesson
                   </Link>
