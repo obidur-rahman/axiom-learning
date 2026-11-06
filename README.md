@@ -74,7 +74,7 @@ arbitrary HTML.
 ## Getting started
 
 ```bash
-git clone <repo-url> axiom-learning
+git clone https://github.com/obidur-rahman/axiom-learning.git
 cd axiom-learning
 npm install
 npm run tauri dev -w apps/desktop
