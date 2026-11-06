@@ -124,20 +124,17 @@ describe('listHostedModels', () => {
 
 describe('pickHostedModels', () => {
   it('uses a known provider’s preferred IDs from the live list', () => {
-    const groq = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile', 'whisper-large-v3'];
+    const groq = ['openai/gpt-oss-20b', 'openai/gpt-oss-120b', 'whisper-large-v3'];
     expect(pickHostedModels(groq, presetForBaseUrl('https://api.groq.com/openai/v1'))).toEqual({
-      chatModel: 'llama-3.3-70b-versatile',
+      chatModel: 'openai/gpt-oss-120b',
       ocrModel: '',
       embedModel: '',
     });
 
-    const groqVision = [
-      ...groq,
-      'meta-llama/llama-4-scout-17b-16e-instruct',
-    ];
+    const groqVision = [...groq, 'qwen/qwen3.8-27b'];
     expect(pickHostedModels(groqVision, presetForBaseUrl('https://api.groq.com/openai/v1'))).toEqual({
-      chatModel: 'llama-3.3-70b-versatile',
-      ocrModel: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      chatModel: 'openai/gpt-oss-120b',
+      ocrModel: 'qwen/qwen3.8-27b',
       embedModel: '',
     });
   });

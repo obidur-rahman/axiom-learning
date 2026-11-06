@@ -282,7 +282,7 @@ export function SettingsForm() {
           <input
             value={form.chatModel}
             onChange={(event) => update({ chatModel: event.target.value })}
-            placeholder={form.mode === 'local' ? 'qwen2.5:7b' : 'llama-3.3-70b-versatile'}
+            placeholder={form.mode === 'local' ? 'qwen2.5:7b' : 'openai/gpt-oss-120b'}
             list="axiom-provider-models"
             className="input"
           />
@@ -293,7 +293,7 @@ export function SettingsForm() {
           <input
             value={form.ocrModel}
             onChange={(event) => update({ ocrModel: event.target.value })}
-            placeholder={form.mode === 'local' ? 'qwen2.5vl:3b' : 'vision model id'}
+            placeholder={form.mode === 'local' ? 'qwen2.5vl:3b' : 'qwen/qwen3.8-27b'}
             list="axiom-provider-models"
             className="input"
           />

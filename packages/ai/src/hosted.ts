@@ -36,11 +36,11 @@ export const HOSTED_PROVIDERS: readonly HostedProviderPreset[] = [
     label: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
     keyPrefixes: ['gsk_'],
-    preferChat: ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant'],
-    preferVision: [
-      'meta-llama/llama-4-scout-17b-16e-instruct',
-      'meta-llama/llama-4-maverick-17b-128e-instruct',
-    ],
+    // Self-serve free-tier models: Llama 3.x and the Llama 4 vision models
+    // have moved to enterprise-only, so prefer the GPT-OSS pair and Qwen.
+    preferChat: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'],
+    // Qwen 3.8 27B is Groq's multimodal model: images in, up to 3 per request.
+    preferVision: ['qwen/qwen3.8-27b'],
     // Groq has no /embeddings endpoint, so retrieval falls back to keywords.
     preferEmbed: [],
   },
