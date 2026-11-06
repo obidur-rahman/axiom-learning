@@ -12,6 +12,15 @@ courses, material, lessons and progress live in one local SQLite database.
 > edges, missing features and schema changes between builds. See
 > [Alpha notes](#alpha-notes).
 
+## Download
+
+**[Axiom Learning 0.1.0 — Windows x64 installer](https://github.com/obidur-rahman/axiom-learning/releases/download/v0.1.0/Axiom.Learning_0.1.0_x64-setup.exe)** (5.4 MiB)
+
+Windows 10 or 11. Point **Settings → AI provider** at a local server (LM
+Studio, Ollama, vLLM) or a hosted OpenAI-compatible endpoint after the first
+launch. Every build, including this one, is on the
+[Releases page](https://github.com/obidur-rahman/axiom-learning/releases).
+
 ## What it does
 
 - **Courses** — create a course with level, language (English / Bangla / mixed)
@@ -63,15 +72,16 @@ Material text is always data, never instructions: the pipeline keeps model
 output behind Zod schemas and renders lesson content as structured blocks, not
 arbitrary HTML.
 
-## Requirements
+## Requirements for building
 
-- Windows 10 or 11 (the alpha ships an NSIS installer for Windows)
+Windows 10 or 11, plus:
+
 - [Node.js](https://nodejs.org) 22 LTS or newer, with npm
 - [Rust](https://rustup.rs) stable (1.77+) with the MSVC toolchain, for the
   Tauri shell
 - An OpenAI-compatible endpoint — a local server is enough to start
 
-## Getting started
+## Build from source
 
 ```bash
 git clone https://github.com/obidur-rahman/axiom-learning.git
