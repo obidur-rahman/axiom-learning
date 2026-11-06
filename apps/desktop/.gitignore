@@ -1,4 +1,3 @@
-# Icon variants used by the desktop web app shell / About panel
-# (not consumed by Tauri; Tauri icons live in apps/desktop/src-tauri/icons/)
-icon-dark.png
-icon-light.png
+# Icon variants used by the desktop web app shell / About panel are shipped in
+# the bundle and tracked in git (see the exception in the root .gitignore).
+# Tauri icons live in apps/desktop/src-tauri/icons/.

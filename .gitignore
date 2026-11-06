@@ -12,6 +12,10 @@ target/
 *.cs
 inject.js
 
+# App shell icons the UI loads at runtime: part of the product, not tooling.
+!apps/desktop/public/icon-dark.png
+!apps/desktop/public/icon-light.png
+
 # temp project-scoped artifacts
 pixel.png
 screenshots/
