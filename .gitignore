@@ -5,3 +5,14 @@ dist/
 target/
 *.tsbuildinfo
 .DS_Store
+
+# screenshot / verification tooling
+*.png
+*.ps1
+*.cs
+inject.js
+
+# temp project-scoped artifacts
+pixel.png
+screenshots/
+.kilo/

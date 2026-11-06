@@ -14,6 +14,15 @@ const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 export const metadata: Metadata = {
   title: 'Axiom Learning',
   description: 'Study only what you need, for your exam.',
+  // Same pair as the logo: the saturated mark for a light browser chrome, the
+  // pale one for a dark one.
+  icons: {
+    icon: [
+      { url: '/icon-dark.png', type: 'image/png', media: '(prefers-color-scheme: light)' },
+      { url: '/icon-light.png', type: 'image/png', media: '(prefers-color-scheme: dark)' },
+    ],
+    apple: '/icon-dark.png',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

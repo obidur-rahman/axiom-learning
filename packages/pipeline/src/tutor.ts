@@ -1,7 +1,7 @@
 import type { DbDriver } from '@axiom/data';
 import { TUTOR_SYSTEM } from './prompts';
 import { tokenize } from './lessons';
-import type { ProviderConfig } from '@axiom/ai';
+import { beforeModelCall, type ProviderConfig } from '@axiom/ai';
 import { retrievePagesSmart } from './embeddings';
 
 /** One exchange in the tutor thread (kept in the UI, not in the DB). */
@@ -81,10 +81,17 @@ export async function streamTutorAnswer(
     .join('\n\n')
     .slice(0, MAX_RETRIEVAL_CHARS);
 
+  await beforeModelCall(config.chatModel, 'chat');
   const body = {
     model: config.chatModel,
     stream: true,
     temperature: 0.2,
+    ...(config.chatThink === undefined
+      ? {}
+      : {
+          think: config.chatThink,
+          ...(config.chatThink ? {} : { chat_template_kwargs: { enable_thinking: false } }),
+        }),
     messages: [
       {
         role: 'system',

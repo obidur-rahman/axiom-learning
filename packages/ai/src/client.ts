@@ -12,7 +12,37 @@ export interface ChatOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Ollama's thinking switch. Leave undefined for endpoints that do not know
+   * the field; set false on OCR to keep the whole budget for the transcript.
+   */
+  think?: boolean;
   signal?: AbortSignal;
+}
+
+export type ModelPurpose = 'chat' | 'embed' | 'vision';
+
+/**
+ * One hook runs before every model request. The desktop app uses it to swap
+ * the local Ollama model: only the model for this request stays in memory,
+ * and the others are unloaded first. A hook must never throw: if a swap
+ * fails, the request itself should report the real problem.
+ */
+export type BeforeModelCall = (model: string, purpose: ModelPurpose) => Promise<void>;
+
+let beforeModelCallHook: BeforeModelCall | null = null;
+
+export function setBeforeModelCall(next: BeforeModelCall | null): void {
+  beforeModelCallHook = next;
+}
+
+export async function beforeModelCall(model: string, purpose: ModelPurpose): Promise<void> {
+  if (beforeModelCallHook === null) return;
+  try {
+    await beforeModelCallHook(model, purpose);
+  } catch {
+    // The provider request stays in charge of reporting failures.
+  }
 }
 
 export interface ChatUsage {
@@ -23,6 +53,11 @@ export interface ChatUsage {
 
 export interface ChatResult {
   content: string;
+  /**
+   * Thinking models (Qwen3 and friends) put their scratchpad here and leave
+   * `content` empty when the token budget runs out before the answer.
+   */
+  reasoning?: string;
   usage?: ChatUsage;
   model: string;
 }
@@ -86,25 +121,37 @@ export async function chat(
   messages: ChatMessage[],
   options: ChatOptions = {},
 ): Promise<ChatResult> {
+  const model = options.model ?? config.chatModel;
   const body: Record<string, unknown> = {
-    model: options.model ?? config.chatModel,
+    model,
     messages,
     stream: false,
     temperature: options.temperature,
   };
   if (options.maxTokens !== undefined) body.max_tokens = options.maxTokens;
+  if (options.think !== undefined) {
+    body.think = options.think;
+    // Ollama ignores unknown fields; vLLM and LM Studio read this one. It is
+    // the only portable way to switch a thinking template off.
+    if (!options.think) body.chat_template_kwargs = { enable_thinking: false };
+  }
+  await beforeModelCall(model, 'chat');
   const data = (await postJson(config, '/chat/completions', body, options.signal)) as {
-    choices?: { message?: { content?: string } }[];
+    choices?: { message?: { content?: string; reasoning?: string; reasoning_content?: string } }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     model?: string;
   };
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') {
+  const message = data.choices?.[0]?.message;
+  const content = typeof message?.content === 'string' ? message.content : '';
+  const reasoning = typeof message?.reasoning === 'string' ? message.reasoning : message?.reasoning_content;
+  // A thinking model can answer entirely in `reasoning`; that is still a reply.
+  if (content === '' && (reasoning === undefined || reasoning === '')) {
     throw new ProviderError('chat: response has no message content');
   }
   const usage = data.usage;
   return {
     content,
+    reasoning,
     usage: usage
       ? {
           promptTokens: usage.prompt_tokens,
@@ -208,6 +255,7 @@ export async function embed(
   if (!config.embedModel) {
     throw new ProviderError('embed: no embedModel configured');
   }
+  await beforeModelCall(config.embedModel, 'embed');
   const data = (await postJson(
     config,
     '/embeddings',

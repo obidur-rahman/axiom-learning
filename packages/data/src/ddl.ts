@@ -178,8 +178,15 @@ export const MIGRATIONS: string[] = [
     id TEXT PRIMARY KEY CHECK (id = 'default'),
     base_url TEXT NOT NULL,
     chat_model TEXT NOT NULL,
+    ocr_model TEXT,
     embed_model TEXT,
     mode TEXT NOT NULL DEFAULT 'local' CHECK (mode IN ('local','hosted')),
+    ocr_think INTEGER NOT NULL DEFAULT 0,
+    chat_think INTEGER NOT NULL DEFAULT 0,
+    ocr_max_edge INTEGER NOT NULL DEFAULT 1400,
+    ocr_max_tokens INTEGER NOT NULL DEFAULT 1024,
+    single_model_mode INTEGER NOT NULL DEFAULT 1,
+    auto_unload INTEGER NOT NULL DEFAULT 1,
     detected_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );`,
@@ -288,6 +295,21 @@ export const JOB_TABLE_DDL = `CREATE TABLE IF NOT EXISTS jobs (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     finished_at TEXT
   );`;
+
+/**
+ * Schema v3 adds the per-role model columns. SQLite cannot add several
+ * columns in one statement, and a fresh table already has them, so the
+ * upgrade checks PRAGMA table_info and adds only what is missing.
+ */
+export const PROVIDER_CONFIG_COLUMNS: [name: string, definition: string][] = [
+  ['ocr_model', 'TEXT'],
+  ['ocr_think', 'INTEGER NOT NULL DEFAULT 0'],
+  ['chat_think', 'INTEGER NOT NULL DEFAULT 0'],
+  ['ocr_max_edge', 'INTEGER NOT NULL DEFAULT 1400'],
+  ['ocr_max_tokens', 'INTEGER NOT NULL DEFAULT 1024'],
+  ['single_model_mode', 'INTEGER NOT NULL DEFAULT 1'],
+  ['auto_unload', 'INTEGER NOT NULL DEFAULT 1'],
+];
 
 export const REBUILD_JOBS_MIGRATION: string[] = [
   `DROP TABLE IF EXISTS jobs_old;`,

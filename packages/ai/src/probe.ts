@@ -7,9 +7,39 @@ function strip(text: string): string {
   return text.replace(/^\s*```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
 }
 
-/** A 1x1 transparent PNG as a data URI, for the vision probe. */
-const TINY_PNG =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAbSJb4AAAAEklEQVR42mNk+M+ACzCBkgAFgAIAn2cB/Q36NigAAAAASUVORK5CYII=';
+/**
+ * What the endpoint actually said. Thinking models (Qwen3, DeepSeek) default
+ * to a scratchpad and leave `content` empty when the budget runs out, so the
+ * reasoning text is the only evidence of what the model can do.
+ */
+function answerText(result: { content: string; reasoning?: string }): string {
+  const content = result.content.trim();
+  return content !== '' ? content : (result.reasoning ?? '').trim();
+}
+
+/** Parse the reply as JSON, falling back to the first object or array inside prose. */
+function firstJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Fall through to the embedded-value search.
+  }
+  const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+  if (match === null) return undefined;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A 32x32 solid red PNG, for the vision probe. Acceptance alone proves
+ * nothing: a text-only endpoint happily answers the colour question without
+ * ever seeing the image, so the reply itself has to name the colour.
+ */
+const PROBE_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGO4IyJCU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAJ3LED3QqzauAAAAAElFTkSuQmCC';
 
 /** Extra request headers some local endpoints (LM Studio) prefer. */
 const localProbeHeaders = { 'Content-Type': 'application/json' };
@@ -27,10 +57,11 @@ export async function probeCapabilities(
   const createTimeout = () => AbortSignal.timeout(timeoutMs);
   const capabilities: Capabilities = { ...EMPTY_CAPABILITIES };
 
-  // 1. Chat: a tiny completion.
+  // 1. Chat: a tiny completion. The budget covers a short thinking pass too,
+  // otherwise a reasoning model fails every probe below it.
   try {
     await chat(config, [{ role: 'user', content: 'Reply with the single word: ok.' }], {
-      maxTokens: 8,
+      maxTokens: 64,
       signal: createTimeout(),
     });
     capabilities.chat = true;
@@ -43,11 +74,9 @@ export async function probeCapabilities(
     const result = await chat(
       config,
       [{ role: 'user', content: 'Return this exact JSON: {"ok":true}' }],
-      { maxTokens: 32, temperature: 0, signal: createTimeout() },
+      { maxTokens: 512, temperature: 0, signal: createTimeout() },
     );
-    const parsed = JSON.parse(
-      strip(result.content),
-    );
+    const parsed = firstJson(strip(answerText(result)));
     capabilities.jsonMode = parsed === true || (typeof parsed === 'object' && parsed !== null);
   } catch {
     capabilities.jsonMode = false;
@@ -63,22 +92,29 @@ export async function probeCapabilities(
     }
   }
 
-  // 4. Vision: send a 1x1 image and see if the endpoint accepts it.
+  // 4. Vision: send a solid red image and require the reply to name the
+  // colour. A model that cannot see answers the prompt anyway, and wrongly.
+  // Probe the OCR model when one is configured: that is the model scans use.
   try {
-    await chat(
+    const result = await chat(
       config,
       [
         {
           role: 'user',
           content: [
-            { type: 'text', text: 'What color is this image? Reply in one word.' },
-            { type: 'image_url', image_url: { url: TINY_PNG } },
+            { type: 'text', text: 'What colour is this image? Reply in one word.' },
+            { type: 'image_url', image_url: { url: PROBE_PNG } },
           ] as unknown as string,
         },
       ],
-      { maxTokens: 8, signal: createTimeout() },
+      {
+        model: config.ocrModel ?? config.chatModel,
+        maxTokens: 256,
+        temperature: 0,
+        signal: createTimeout(),
+      },
     );
-    capabilities.vision = true;
+    capabilities.vision = /red\b|#f00\b|#ff0000|255,\s*0,\s*0/i.test(answerText(result));
   } catch {
     capabilities.vision = false;
   }
@@ -144,4 +180,14 @@ export function pickLocalModels(models: readonly string[]): {
   const chatModel =
     chatCandidates.find((id) => /instruct|chat/i.test(id)) ?? chatCandidates[0] ?? '';
   return { chatModel, embedModel };
+}
+
+/** IDs that usually mean "this model can see images". */
+const VISION_HINT = /(?:\.|[/:_-])(vl|vision|llava|moondream|minicpm-v|gemma3|pixtral|internvl)/i;
+
+/** Picks the first advertised model that looks vision-capable, or ''. */
+export function pickOcrModel(models: readonly string[]): string {
+  return (
+    models.find((id) => VISION_HINT.test(id) && !/embed/i.test(id)) ?? ''
+  );
 }

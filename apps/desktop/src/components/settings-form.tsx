@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { capabilitySummary, autoDetect, loadForm, probeAndStore, saveForm, type ProviderForm } from '../lib/provider';
+import { localModelInventory, type LocalModelInventory } from '../lib/model-manager';
 import { isDesktopRuntime } from '../lib/db';
+import { ModelLibrary } from './model-library';
+import { Toggle } from './toggle-row';
 
 interface Probe {
   loading: boolean;
@@ -10,11 +13,17 @@ interface Probe {
   error: string | null;
 }
 
+const EDGE_OPTIONS = [
+  { value: 1024, label: 'Fast - 1024 px long edge' },
+  { value: 1400, label: 'Balanced - 1400 px' },
+  { value: 1600, label: 'Detailed - 1600 px' },
+  { value: 2048, label: 'Maximum - 2048 px' },
+];
+
 /**
- * AI provider settings (task 8): the single entry where the model is
- * configured. One primary action (Save and probe); "Try local ports" is the
- * secondary auto-detect. The API key goes to the OS secure store, never to
- * the database.
+ * AI model settings. One endpoint, three roles: chat, OCR and embeddings each
+ * get their own model. The local runtime section decides how those models are
+ * kept in memory; the OCR section trades speed for fidelity.
  */
 export function SettingsForm() {
   const [form, setForm] = useState<ProviderForm | null>(null);
@@ -22,6 +31,16 @@ export function SettingsForm() {
   const [saved, setSaved] = useState<string | null>(null);
   const [probe, setProbe] = useState<Probe>({ loading: false, summary: null, error: null });
   const [detecting, setDetecting] = useState(false);
+  const [inventory, setInventory] = useState<LocalModelInventory | null>(null);
+
+  const refreshInventory = useCallback(async (baseUrl?: string) => {
+    if (!isDesktopRuntime()) return;
+    try {
+      setInventory(await localModelInventory(baseUrl));
+    } catch {
+      setInventory(null);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isDesktopRuntime()) {
@@ -29,11 +48,14 @@ export function SettingsForm() {
       return;
     }
     void loadForm()
-      .then(setForm)
+      .then((loaded) => {
+        setForm(loaded);
+        if (loaded.mode === 'local') void refreshInventory(loaded.baseUrl);
+      })
       .catch((error: unknown) => {
         setLoadError(error instanceof Error ? error.message : String(error));
       });
-  }, []);
+  }, [refreshInventory]);
 
   const update = useCallback((patch: Partial<ProviderForm>) => {
     setForm((current) => (current === null ? current : { ...current, ...patch }));
@@ -46,12 +68,14 @@ export function SettingsForm() {
       return;
     }
     await saveForm(form);
+    await refreshInventory();
     setSaved('Saved. Probing capabilities...');
     setProbe({ loading: true, summary: null, error: null });
     try {
       const caps = await probeAndStore();
       setProbe({ loading: false, summary: capabilitySummary(caps), error: null });
       setSaved('Saved and probed.');
+      await refreshInventory();
     } catch (error) {
       setProbe({
         loading: false,
@@ -60,7 +84,7 @@ export function SettingsForm() {
       });
       setSaved('Saved. Probe failed - check the URL and model names.');
     }
-  }, [form]);
+  }, [form, refreshInventory]);
 
   const handleDetect = useCallback(async () => {
     setDetecting(true);
@@ -71,13 +95,14 @@ export function SettingsForm() {
       } else {
         update(found);
         setSaved(
-          `Detected ${found.baseUrl}. Chat model: ${found.chatModel || 'none advertised'}. Save and probe to confirm it.`,
+          `Detected ${found.baseUrl}. Chat model: ${found.chatModel || 'none advertised'}; OCR model: ${found.ocrModel || 'none advertised'}. Save and probe to confirm it.`,
         );
+        await refreshInventory(found.baseUrl);
       }
     } finally {
       setDetecting(false);
     }
-  }, [update]);
+  }, [update, refreshInventory]);
 
   if (loadError !== '') {
     return <p className="rounded-xl border border-border bg-surface p-4 text-sm text-text-muted">{loadError}</p>;
@@ -93,10 +118,13 @@ export function SettingsForm() {
     );
   }
 
+  const installed = inventory?.models.map((model) => model.name) ?? [];
+  const loaded = inventory?.loaded.map((model) => model.name) ?? [];
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       <fieldset>
-        <legend className="text-xs text-text-muted">Where the model runs</legend>
+        <legend className="text-xs text-text-muted">Where the models run</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Provider mode">
           {[
             { value: 'local' as const, label: 'Local model', hint: 'Ollama, LM Studio, vLLM on this machine' },
@@ -134,24 +162,43 @@ export function SettingsForm() {
         </span>
       </label>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <datalist id="axiom-provider-models">
+        {installed.map((name) => <option key={name} value={name} />)}
+      </datalist>
+
+      <div className="grid gap-3 sm:grid-cols-3">
         <label className="field">
           Chat model
           <input
             value={form.chatModel}
             onChange={(event) => update({ chatModel: event.target.value })}
             placeholder="qwen2.5:7b"
+            list="axiom-provider-models"
             className="input"
           />
+          <span className="text-[11.5px] text-text-muted">Topics, lessons, tutor, questions.</span>
         </label>
         <label className="field">
-          Embedding model (optional)
+          OCR / vision model
+          <input
+            value={form.ocrModel}
+            onChange={(event) => update({ ocrModel: event.target.value })}
+            placeholder="qwen2.5vl:3b"
+            list="axiom-provider-models"
+            className="input"
+          />
+          <span className="text-[11.5px] text-text-muted">Page images. Empty uses the chat model.</span>
+        </label>
+        <label className="field">
+          Embedding model
           <input
             value={form.embedModel}
             onChange={(event) => update({ embedModel: event.target.value })}
             placeholder="nomic-embed-text"
+            list="axiom-provider-models"
             className="input"
           />
+          <span className="text-[11.5px] text-text-muted">Optional; improves page ranking.</span>
         </label>
       </div>
 
@@ -168,6 +215,112 @@ export function SettingsForm() {
           Stored in the OS secure store (Windows Credential Manager), never in the database.
         </span>
       </label>
+
+      <div className="rounded-[var(--radius)] border border-border bg-surface p-3">
+        <p className="text-[13px] font-medium">OCR speed and fidelity</p>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-text-muted">
+          A page image costs time in proportion to its pixels. Lower is much faster and is
+          usually enough for printed text; raise it for dense tables or faint handwriting.
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="field">
+            Page image resolution
+            <select
+              value={form.ocrMaxEdge}
+              onChange={(event) => update({ ocrMaxEdge: Number(event.target.value) })}
+              className="input"
+            >
+              {EDGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Max transcription tokens
+            <input
+              type="number"
+              min={128}
+              max={8192}
+              step={128}
+              value={form.ocrMaxTokens}
+              onChange={(event) =>
+                update({ ocrMaxTokens: Math.min(8192, Math.max(128, Number(event.target.value) || 1024)) })
+              }
+              className="input"
+            />
+            <span className="text-[11.5px] text-text-muted">Stops a runaway page from stalling the read.</span>
+          </label>
+        </div>
+
+        <div className="mt-1 border-t border-border">
+          <Toggle
+            id="pref-ocr-think"
+            label="OCR model uses thinking"
+            description="Off by default: the scratchpad eats the reply budget on a transcription task. Turn on only for a model that reads hard pages better when it reasons."
+            checked={form.ocrThink}
+            onCheckedChange={(ocrThink) => update({ ocrThink })}
+          />
+          <Toggle
+            id="pref-chat-think"
+            label="Chat model uses thinking"
+            description="Thinking helps lessons and roadmap reasoning, but adds seconds to every request. Local thinking models only."
+            checked={form.chatThink}
+            onCheckedChange={(chatThink) => update({ chatThink })}
+          />
+        </div>
+      </div>
+
+      {form.mode === 'local' && (
+        <div className="rounded-[var(--radius)] border border-border bg-surface p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[13px] font-medium">Local model handling</p>
+            <button
+              type="button"
+              className="btn btn-quiet btn-sm"
+              onClick={() => void refreshInventory(form.baseUrl)}
+            >
+              Refresh model list
+            </button>
+          </div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-text-muted">
+            The app switches between the OCR and chat models automatically, so only the model
+            in use is loaded.
+          </p>
+          <Toggle
+            id="pref-single-model"
+            label="One model in memory at a time"
+            description="Before each request, unload the other role models. Slower first token after a switch, far less RAM."
+            checked={form.singleModelMode}
+            onCheckedChange={(singleModelMode) => update({ singleModelMode })}
+          />
+          <Toggle
+            id="pref-auto-unload"
+            label="Unload models when a job finishes"
+            description="After reading a file or building a lesson, free the model memory. The next job loads its own model."
+            checked={form.autoUnload}
+            onCheckedChange={(autoUnload) => update({ autoUnload })}
+          />
+        </div>
+      )}
+
+      {form.mode === 'local' && (
+        <ModelLibrary
+          installed={installed}
+          loaded={loaded}
+          ollama={inventory?.ollama === true}
+          baseUrl={form.baseUrl}
+          onChanged={() => void refreshInventory(form.baseUrl)}
+          onPick={(role, model) =>
+            update(
+              role === 'chat'
+                ? { chatModel: model }
+                : role === 'ocr'
+                  ? { ocrModel: model }
+                  : { embedModel: model },
+            )
+          }
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" onClick={() => void handleSave()} className="btn btn-primary" disabled={probe.loading}>

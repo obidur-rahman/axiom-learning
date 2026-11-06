@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   makePractice,
   scoreWrittenAnswer,
@@ -24,6 +25,7 @@ import { ProgressBar } from './progress-bar';
  */
 export function PracticePanel({ courseId }: { courseId: string }) {
   const prefs = usePrefs();
+  const params = useSearchParams();
   const [topics, setTopics] = useState<TopicOption[]>([]);
   const [autoKnownNote, setAutoKnownNote] = useState('');
   const [topicId, setTopicId] = useState('');
@@ -41,9 +43,15 @@ export function PracticePanel({ courseId }: { courseId: string }) {
       const db = await getDb();
       const options = await listTopicOptions(db.driver, courseId);
       setTopics(options);
-      setTopicId(options[0]?.id ?? '');
+      // The roadmap links here with ?topic=..., so the picked topic is kept.
+      const requested = params.get('topic');
+      setTopicId(
+        requested !== null && options.some((topic) => topic.id === requested)
+          ? requested
+          : (options[0]?.id ?? ''),
+      );
     })();
-  }, [courseId]);
+  }, [courseId, params]);
 
   const resetAnswers = useCallback(() => {
     setChoices({});

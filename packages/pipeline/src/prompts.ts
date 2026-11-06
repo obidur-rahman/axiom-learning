@@ -120,6 +120,32 @@ Rules:
 - citationPages are the page numbers given in the page headers.`,
 };
 
+export const LESSON_PLAN: PromptSpec = {
+  version: 'lesson-plan@1',
+  system: `${DATA_RULE}
+You plan a slide lesson for one topic. Reply with JSON only:
+{"beats":[{"kind":"hook","focus":"one sentence naming what this slide must teach"}]}
+Allowed kind values: hook, intuition, worked, contrast, note_anchor, recall, exam_shape.
+How many slides:
+- Match the scope the material actually shows, never a fixed number. One definition
+  or one short idea is 1 to 3 slides.
+- A normal topic is 4 to 7 slides. A complex topic with several formulas, a
+  derivation, a multi-step process or multiple kinds of calculation is 8 to 14.
+- Give every distinct calculation or worked problem its own "worked" slide: if the
+  material shows three problem types, plan three worked slides.
+- Do not pad a short topic and do not merge two ideas onto one slide. Never add a
+  slide that repeats another one.
+Order and shape:
+- Start with a hook or intuition, teach one idea per slide, and finish with recall
+  and, when the material is exam material, exam_shape.
+- Use hook for the motivating question, intuition for the core explanation, worked
+  for a fully solved example, contrast for a confusion, note_anchor for the exact
+  wording in the notes, recall for active recall, exam_shape for mark-scheme shape.
+- A lesson that needs only one slide uses kind intuition.
+- focus is one sentence: what this slide specifically explains or solves, using
+  the material's own terms. Do not invent content the pages do not support.`,
+};
+
 export const LESSON_OBJECTIVE: PromptSpec = {
   version: 'lesson-objective@1',
   system: `${DATA_RULE}
@@ -131,11 +157,12 @@ Both must be supported by the given pages. Keep each under 30 words.`,
 };
 
 export const TEACH_BEAT: PromptSpec = {
-  version: 'teach-beat@1',
+  version: 'teach-beat@2',
   system: `${DATA_RULE}
 You write ONE beat of a teaching lesson. Reply with JSON only:
 {"title":"claim, not a label","intro":"1-2 sentences",
 "blocks":[{"type":"text","text":"..."}],"takeaway":"one sentence",
+"animation":{"needed":false,"brief":""},
 "check":{"prompt":"...","answer":"..."},"citationPages":[4]}
 Allowed blocks:
 {"type":"text","text":"..."}
@@ -159,7 +186,37 @@ Rules that matter:
   outside the visual.
 - Cite the page number that supports each fact. Never invent a page.
 - If the pages do not support the beat, say so plainly in intro and return an
-  empty check. Do not fill space with general knowledge.`,
+  empty check. Do not fill space with general knowledge.
+- Set animation.needed true only when motion or spatial change carries the
+  idea: a process over time, a geometric relation, a wave or field, a limit, a
+  force diagram. Leave it false for definitions, history, notation, exam tips,
+  and anything one sentence or one still diagram already explains. Never more
+  than one beat in a lesson asks for an animation.
+- When needed is true, brief is one sentence: what moves, what changes, and
+  what the learner should watch. When false, brief is "".`,
+};
+
+export const ANIMATION_SCRIPT: PromptSpec = {
+  version: 'animation-script@1',
+  system: `You write one short, self-contained animation that makes a single
+idea visible. Reply with JSON only:
+{"title":"2 to 6 words naming what is on screen","html":"<!doctype html>..."}
+Rules for html:
+- A complete HTML document with inline <style> and <script> only. No external
+  URLs, imports, fonts, images or network requests. No localStorage, alert,
+  prompt, window.open or top navigation.
+- Draw with inline SVG (preferred) or <canvas>. Animate with CSS keyframes or
+  requestAnimationFrame.
+- Use an 800x450 stage that scales to the frame. Set html and body margin 0,
+  background #14141f, text #e6e9ef, one accent #cba6f7.
+- One idea only, exactly the brief. Do not add a second idea or a caption
+  paragraph. The motion itself must teach: things move, build, or transform.
+- Loop seamlessly over 6 to 14 seconds and start automatically. No controls.
+- Labels are large (16px or more at 800x450), at most 8 words, high contrast,
+  and never cover the motion.
+- Write mathematics with Unicode (\u222b \u03a3 \u221a \u03c8 \u0127 \u2202 \u0394 \u03b8 \u2248 \u2264 \u2192 \u00b1) and
+  never with LaTeX commands: there is no maths renderer inside the frame.
+- Keep it under 200 lines and make sure it runs with no console errors.`,
 };
 
 export const TEACH_CRITIC: PromptSpec = {

@@ -5,27 +5,35 @@ import Link from 'next/link';
 import {
   deleteMaterial,
   enqueue,
+  getFileData,
   listMaterials,
   listPages,
   replacePages,
-  updateMaterialStatus,
   storeFileData,
   type Material,
   type MaterialPage,
 } from '@axiom/data';
-import { embedAndStorePages, type ExtractedPage } from '@axiom/pipeline';
-import { onAppEvent } from '../lib/events';
+import { emitAppEvent, onAppEvent } from '../lib/events';
+import {
+  exportLatex,
+  exportPdf,
+  exportWord,
+  sanitizeFilename,
+  type ExportProgress,
+  type ExportResult,
+} from '../lib/export';
 import {
   arrayBufferToBase64,
-  extractPdfTextLayer,
-  extractScannedPdf,
-  makeAppExtractors,
   makeVisionReader,
-  pdfPageToBase64Png,
+  pdfPageToBase64Image,
+  type VisionImage,
 } from '../lib/extract';
+import { toPagePatch } from '../lib/read-material';
 import { loadConfig } from '../lib/provider';
 import { getDb } from '../lib/db';
 import { loadPrefs, usePrefs } from '../lib/prefs';
+import { OpenExportLink } from './open-export-link';
+import { PageInspector } from './page-inspector';
 import { WorkProgress, type WorkState } from './work-progress';
 
 type DbHandle = Awaited<ReturnType<typeof getDb>>;
@@ -33,16 +41,6 @@ type DbHandle = Awaited<ReturnType<typeof getDb>>;
 interface Item {
   material: Material;
   pages: MaterialPage[];
-}
-
-function toPagePatch(page: ExtractedPage) {
-  return {
-    pageNumber: page.pageNumber,
-    text: page.text,
-    extractionMethod: page.method,
-    confidence: page.confidence,
-    lowConfidence: page.confidence !== null && page.confidence < 0.75,
-  };
 }
 
 /**
@@ -60,10 +58,51 @@ export function UploadPanel({ courseId }: { courseId: string }) {
   const [pasteFor, setPasteFor] = useState<number | null>(null);
   const [pasteText, setPasteText] = useState('');
   const [activeMaterialId, setActiveMaterialId] = useState<string | null>(null);
-  const [uploadKind, setUploadKind] = useState<'syllabus' | 'notes' | 'past_questions' | 'textbook' | 'other'>('other');
+  const [uploadKind, setUploadKind] = useState<'syllabus' | 'notes' | 'past_questions' | 'textbook' | 'other'>('notes');
   const [query, setQuery] = useState('');
+  const [liveRead, setLiveRead] = useState<{
+    materialId: string;
+    page: number | null;
+    total: number | null;
+    message: string;
+  } | null>(null);
+  const [openPages, setOpenPages] = useState<string[]>([]);
+  const [busyPage, setBusyPage] = useState<{ materialId: string; page: number } | null>(null);
+  const [exportState, setExportState] = useState<{
+    message: string;
+    percent: number | null;
+    tone: 'busy' | 'ok' | 'error';
+    result: ExportResult | null;
+  } | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
-  const sessionFiles = useRef(new Map<string, File>());
+
+  const exporting = exportState?.tone === 'busy';
+
+  /** Same contract as the page export: dialog first, then visible progress. */
+  const runExport = async (
+    label: string,
+    task: (report: ExportProgress) => Promise<ExportResult | null>,
+  ) => {
+    if (exporting) return;
+    setExportState({ message: `Preparing ${label}...`, percent: 0, tone: 'busy', result: null });
+    try {
+      const saved = await task((message, percent) =>
+        setExportState({ message, percent, tone: 'busy', result: null }),
+      );
+      setExportState(
+        saved
+          ? { message: `${label} saved.`, percent: null, tone: 'ok', result: saved }
+          : null,
+      );
+    } catch (error) {
+      setExportState({
+        message: `${label} failed: ${error instanceof Error ? error.message : String(error)}`,
+        percent: null,
+        tone: 'error',
+        result: null,
+      });
+    }
+  };
 
   const load = useCallback(async () => {
     const db = await getDb();
@@ -78,12 +117,64 @@ export function UploadPanel({ courseId }: { courseId: string }) {
     );
   }, [courseId]);
 
+  /** Reload one material's pages while it is being read, page by page. */
+  const refreshPages = useCallback(async (materialId: string) => {
+    const db = await getDb();
+    const pages = await listPages(db.driver, materialId);
+    setItems((current) =>
+      current.map((item) => (item.material.id === materialId ? { ...item, pages } : item)),
+    );
+  }, []);
+
   useEffect(() => {
     void load();
     return onAppEvent((event) => {
-      if (event.kind === 'job-updated' && event.courseId === courseId) void load();
+      if (event.kind === 'worker-tick') return;
+      if (event.courseId !== courseId) return;
+      if (event.kind === 'job-progress' && event.jobKind === 'read_material') {
+        setWork({
+          label: 'Reading material',
+          detail: event.message,
+          percent: event.percent,
+          tone: 'busy',
+        });
+        if (event.materialId !== undefined) {
+          const materialId = event.materialId;
+          setLiveRead({
+            materialId,
+            page: event.page?.number ?? null,
+            total: event.page?.total ?? null,
+            message: event.message,
+          });
+          // Open the page grid for the file being read, so its progress is
+          // visible without hunting for it in the list.
+          setOpenPages((current) =>
+            current.includes(materialId) ? current : [...current, materialId],
+          );
+          // The page row is written before the event is emitted, so every
+          // progress message can refresh the grid (text-layer pages too).
+          void refreshPages(materialId);
+        }
+        return;
+      }
+      if (event.kind === 'job-updated') {
+        if (event.jobKind === 'read_material') {
+          setWork(
+            event.status === 'failed'
+              ? {
+                  label: 'A file could not be read',
+                  detail: event.error ?? 'The read failed.',
+                  percent: null,
+                  tone: 'error',
+                }
+              : null,
+          );
+          if (event.status !== 'queued' && event.status !== 'running') setLiveRead(null);
+        }
+        void load();
+      }
     });
-  }, [load, courseId]);
+  }, [load, refreshPages, courseId]);
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
@@ -91,125 +182,56 @@ export function UploadPanel({ courseId }: { courseId: string }) {
       const list = Array.from(files);
       setBusy(true);
       setNotice(null);
-      setWork({ label: list[0]?.name ?? 'Material', detail: 'Preparing the read', percent: 0, tone: 'busy' });
+      setWork({
+        label: list[0]?.name ?? 'Material',
+        detail: 'Storing the file on this device',
+        percent: 4,
+        tone: 'busy',
+      });
       const failures: string[] = [];
       try {
         const db = await getDb();
-        const extractors = makeAppExtractors();
         for (const [index, file] of list.entries()) {
           const position = list.length > 1 ? `File ${index + 1}/${list.length}: ` : '';
           const label = `${position}${file.name}`;
-          const step = (detail: string, percent: number) =>
-            setWork({ label, detail, percent, tone: 'busy' });
-          const pageStep = (page: number, total: number, method: string) => {
-            const what =
-              method === 'text_layer'
-                ? 'Reading the text layer, page'
-                : method === 'vision'
-                  ? 'Vision reading page'
-                  : 'OCR page';
-            step(`${what} ${page} of ${total}`, 12 + Math.round((page / Math.max(1, total)) * 70));
-          };
-          let materialId: string | null = null;
+          // Windows can report an empty type for a PDF. Guessing from the
+          // extension keeps a scan out of the text-file branch.
+          const mime = file.type !== '' ? file.type : mimeFromName(file.name);
+          setWork({
+            label,
+            detail: 'Storing a copy and queueing the read',
+            percent: 10,
+            tone: 'busy',
+          });
           try {
-            // Files stay on this machine. Read the bytes first so we can store
-            // them for the preview panel and run extraction in one pass.
-            step('Reading the file from disk', 3);
             const data = await file.arrayBuffer();
             const material = await db.materials.createMaterial(db.driver, {
               courseId,
               kind: uploadKind,
-              mimeType: file.type,
+              mimeType: mime,
               sizeBytes: file.size,
             });
-            materialId = material.id;
-            step('Storing a copy for the page preview', 8);
-            await storeFileData(db.driver, material.id, data, file.type);
-            sessionFiles.current.set(material.id, file);
-
-            const config = await loadConfig().catch(() => null);
-            const vision = config === null ? undefined : makeVisionReader(async () => config);
-
-            let pages: ExtractedPage[];
-            if (file.type === 'application/pdf') {
-              step('Reading the PDF text layer, page 1', 12);
-              pages = await extractPdfTextLayer(data, (page, total) =>
-                pageStep(page, total, 'text_layer'),
-              );
-              if (pages.every((page) => page.text === null)) {
-                // A CamScanner-style scan has no text layer at all. Read every
-                // page as an image - OCR first, vision for what OCR cannot read.
-                step('No text layer - reading every page as an image', 12);
-                pages = await extractScannedPdf(data, {
-                  onProgress: ({ page, total, method }) => pageStep(page, total, method),
-                  ...(vision === undefined ? {} : { readVision: vision }),
-                });
-              }
-            } else if (file.type.startsWith('image/')) {
-              step('Running OCR on the image', 20);
-              const page = await extractors.extractImage(data, file.type);
-              pages = [page];
-              if (page.text === null && vision !== undefined) {
-                step('OCR found no text - vision reading the image', 55);
-                pages = [await vision({ base64: arrayBufferToBase64(data), mime: file.type })];
-              }
-            } else {
-              step('Reading the text file', 30);
-              pages = [extractors.extractText(await file.text())];
-            }
-            if (pages.every((page) => page.text === null)) {
-              throw new Error(
-                'Every page came back empty. Set a vision model in Settings, or paste the text on the Material tab.',
-              );
-            }
-
-            step(`Saving ${pages.length} page${pages.length === 1 ? '' : 's'}`, 88);
-            await replacePages(db.driver, material.id, pages.map(toPagePatch));
-            await updateMaterialStatus(db.driver, material.id, {
-              status: 'ready',
-              pageCount: pages.length,
+            await storeFileData(db.driver, material.id, data, mime);
+            // Reading runs in the worker: model-reading a forty-page scan of
+            // handwriting takes minutes and must not hold the screen.
+            const jobId = await enqueue(db.driver, 'read_material', {
+              courseId,
+              materialId: material.id,
             });
-            step('Queued topic extraction', 93);
-            await enqueue(db.driver, 'build_topics', { courseId });
-            if (prefs.autoRebuildRoadmap) {
-              step('Queued the roadmap build', 95);
-              await enqueue(db.driver, 'build_roadmap', { courseId });
-            }
-
-            // Best effort: with an embedding model configured, store page
-            // vectors so tutor/practice retrieval upgrades to cosine search.
-            let embedded = 0;
-            if (config !== null && config.embedModel !== undefined && prefs.autoEmbedPages) {
-              try {
-                step('Embedding pages for retrieval', 97);
-                embedded = await embedAndStorePages(
-                  db.driver,
-                  material.id,
-                  pages.map((page) => ({ pageNumber: page.pageNumber, text: page.text })),
-                  config,
-                );
-              } catch {
-                embedded = 0;
-              }
-            }
-
-            const readable = pages.filter((page) => page.text !== null).length;
-            setNotice(
-              `${file.name}: ${pages.length} page${pages.length === 1 ? '' : 's'} read` +
-                ` (${readable} with text${embedded > 0 ? `, ${embedded} embedded` : ''}). ` +
-                'Topic extraction runs in the background.',
-            );
+            // Tell the rail now: the worker claims it on its next poll, and the
+            // queue would otherwise look empty until then.
+            emitAppEvent({
+              kind: 'job-updated',
+              jobId,
+              courseId,
+              jobKind: 'read_material',
+              status: 'queued',
+            });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            if (materialId !== null) {
-              await updateMaterialStatus(db.driver, materialId, {
-                status: 'failed',
-                errorMessage: message,
-              }).catch(() => undefined);
-            }
             failures.push(`${file.name}: ${message}`);
             setWork({
-              label: `${label} could not be read`,
+              label: `${label} could not be added`,
               detail: message,
               percent: null,
               tone: 'error',
@@ -232,8 +254,8 @@ export function UploadPanel({ courseId }: { courseId: string }) {
         setWork({
           label:
             failures.length === 1
-              ? 'One file could not be read'
-              : `${failures.length} files could not be read`,
+              ? 'One file could not be added'
+              : `${failures.length} files could not be added`,
           detail: failures.join(' · '),
           percent: null,
           tone: 'error',
@@ -241,39 +263,44 @@ export function UploadPanel({ courseId }: { courseId: string }) {
         setNotice(null);
       } else {
         setWork(null);
+        setNotice(
+          `${list.length} file${list.length === 1 ? '' : 's'} queued. Reading runs in the background — pages appear here as they are read.`,
+        );
       }
     },
-    [courseId, load, uploadKind, prefs.autoRebuildRoadmap, prefs.autoEmbedPages],
+    [courseId, load, uploadKind],
   );
 
-  /** FR-023: re-read one page with the vision model (needs the file in memory). */
+  /** FR-023: re-read one page with the vision model, from the stored copy. */
   const handleVisionPage = useCallback(
     async (materialId: string, pageNumber: number) => {
-      const file = sessionFiles.current.get(materialId);
-      const db = await getDb();
-      if (file === undefined) {
-        setWork({
-          label: `Page ${pageNumber} could not be re-read`,
-          detail: 'The file is no longer in memory. Add it again to use vision read.',
-          percent: null,
-          tone: 'error',
-        });
-        return;
-      }
       setWork({
-        label: `Vision read of page ${pageNumber}`,
-        detail: 'Sending the page image to the vision model',
+        label: `OCR model read of page ${pageNumber}`,
+        detail: 'Sending the page image to the OCR model',
         percent: null,
         tone: 'busy',
       });
+      setBusyPage({ materialId, page: pageNumber });
       try {
-        const data = await file.arrayBuffer();
-        const reader = makeVisionReader(loadConfig);
-        const base64 =
-          file.type === 'application/pdf'
-            ? await pdfPageToBase64Png(data, pageNumber)
-            : arrayBufferToBase64(data);
-        const read1 = await reader({ base64, mime: file.type === 'application/pdf' ? 'image/png' : file.type });
+        const db = await getDb();
+        const stored = await getFileData(db.driver, materialId);
+        if (stored === null) {
+          throw new Error('The stored copy of this file is missing. Add it again.');
+        }
+        const config = await loadConfig();
+        let image: VisionImage;
+        if (stored.mime === 'application/pdf') {
+          image = await pdfPageToBase64Image(stored.data, pageNumber, config?.ocrMaxEdge);
+        } else if (stored.mime.startsWith('image/')) {
+          image = { base64: arrayBufferToBase64(stored.data), mime: stored.mime };
+        } else {
+          throw new Error('A vision read needs a PDF page or an image.');
+        }
+        const reader = makeVisionReader(async () => config);
+        const read1 = await reader(image);
+        if (read1.text === null) {
+          throw new Error('The model found no readable text on this page.');
+        }
         const pages = await listPages(db.driver, materialId);
         await replacePages(db.driver, materialId, [
           ...pages
@@ -297,6 +324,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
           tone: 'error',
         });
       }
+      setBusyPage(null);
       await load();
     },
     [load],
@@ -340,7 +368,6 @@ export function UploadPanel({ courseId }: { courseId: string }) {
     async (materialId: string) => {
       const db = await getDb();
       await deleteMaterial(db.driver, materialId);
-      sessionFiles.current.delete(materialId);
       await load();
     },
     [load],
@@ -402,7 +429,7 @@ export function UploadPanel({ courseId }: { courseId: string }) {
             }),
         );
         return (
-          <section className="flex flex-col gap-2 rounded-[var(--radius)] border border-border bg-surface p-3" aria-label="Search results">
+          <section className="row flex flex-col gap-2" aria-label="Search results">
             <p className="text-xs text-text-muted">
               {hits.length === 0 ? 'No page contains' : `Found on ${hits.length} page(s):`}
               <span className="ml-1 text-text">“{query.trim()}”</span>
@@ -430,13 +457,47 @@ export function UploadPanel({ courseId }: { courseId: string }) {
         </p>
       )}
 
-      <ul className="flex flex-col gap-3">
+      {exportState !== null && (
+        <div className="rounded-[var(--radius)] border border-border bg-surface px-3 py-2" role="status" aria-live="polite">
+          <p
+            className={`text-[12.5px] ${
+              exportState.tone === 'error'
+                ? 'text-danger'
+                : exportState.tone === 'ok'
+                  ? 'text-known'
+                  : 'text-text-muted'
+            }`}
+          >
+            {exportState.message}
+          </p>
+          {exportState.tone === 'busy' && exportState.percent !== null && (
+            <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-border">
+              <div
+                className="h-full rounded-full bg-accent transition-[width] duration-200"
+                style={{ width: `${exportState.percent}%` }}
+              />
+            </div>
+          )}
+          {exportState.result?.openable === true && (
+            <OpenExportLink result={exportState.result} />
+          )}
+        </div>
+      )}
+
+      {/* Plain rows, not cards: the material screen is the container, and a
+          card per file nested page cards one more level deep. */}
+      <ul className="mt-1">
         {items.map(({ material, pages }) => {
           const flagged = prefs.flagLowConfidence ? pages.filter((page) => page.lowConfidence) : [];
           const hasPages = pages.length > 0;
+          const exportPages = pages.flatMap((page) =>
+            page.text === null || page.text.trim() === ''
+              ? []
+              : [{ pageNumber: page.pageNumber, text: page.text, method: page.extractionMethod }],
+          );
 
           return (
-            <li key={material.id} className="rounded-[var(--radius)] border border-border bg-surface p-3">
+            <li key={material.id} className="row">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-medium">{material.kind.toUpperCase()}</p>
@@ -448,12 +509,100 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                 </div>
                 <div className="flex items-center gap-2">
                   {hasPages && (
+                    <button
+                      onClick={() =>
+                        setOpenPages((current) =>
+                          current.includes(material.id)
+                            ? current.filter((id) => id !== material.id)
+                            : [...current, material.id],
+                        )
+                      }
+                      aria-expanded={openPages.includes(material.id)}
+                      className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs hover:border-accent"
+                    >
+                      {openPages.includes(material.id)
+                        ? 'Hide parsed pages'
+                        : `Parsed pages (${pages.length}${
+                            material.pageCount !== null && material.pageCount !== pages.length
+                              ? `/${material.pageCount}`
+                              : ''
+                          })`}
+                    </button>
+                  )}
+                  {hasPages && (
                     <Link
                       href={`/preview?id=${material.id}`}
                       className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs text-text no-underline hover:border-accent"
                     >
                       Review pages
                     </Link>
+                  )}
+                  {hasPages && (
+                    <details className="relative">
+                      <summary
+                        className="cursor-pointer list-none rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs hover:border-accent"
+                        title="Export every read page of this material"
+                      >
+                        Export
+                      </summary>
+                      <div className="absolute right-0 z-20 mt-1 flex w-40 flex-col rounded-[var(--radius)] border border-border bg-panel p-1 shadow-[var(--shadow-pop)]">
+                        <button
+                          type="button"
+                          disabled={exporting}
+                          className="rounded-[2px] px-2 py-1.5 text-left text-xs hover:bg-surface disabled:opacity-50"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            void runExport('PDF', (report) =>
+                              exportPdf({
+                                title: `${material.kind.replace(/_/g, ' ')} pages`,
+                                pages: exportPages,
+                                filename: `${sanitizeFilename(material.kind)}-pages.pdf`,
+                                onProgress: report,
+                              }),
+                            );
+                          }}
+                          title="Generate one PDF of every read page and save it"
+                        >
+                          PDF (all pages)
+                        </button>
+                        <button
+                          type="button"
+                          disabled={exporting}
+                          className="rounded-[2px] px-2 py-1.5 text-left text-xs hover:bg-surface disabled:opacity-50"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            void runExport('Word', () =>
+                              exportWord({
+                                title: `${material.kind.replace(/_/g, ' ')} pages`,
+                                pages: exportPages,
+                                filename: `${sanitizeFilename(material.kind)}-pages.doc`,
+                              }),
+                            );
+                          }}
+                          title="Save every read page as one Word document"
+                        >
+                          Word (.doc)
+                        </button>
+                        <button
+                          type="button"
+                          disabled={exporting}
+                          className="rounded-[2px] px-2 py-1.5 text-left text-xs hover:bg-surface disabled:opacity-50"
+                          onClick={(event) => {
+                            event.currentTarget.closest('details')?.removeAttribute('open');
+                            void runExport('LaTeX', () =>
+                              exportLatex({
+                                title: `${material.kind.replace(/_/g, ' ')} pages`,
+                                pages: exportPages,
+                                filename: `${sanitizeFilename(material.kind)}-pages.tex`,
+                              }),
+                            );
+                          }}
+                          title="Save every read page as one editable LaTeX document"
+                        >
+                          LaTeX (.tex)
+                        </button>
+                      </div>
+                    </details>
                   )}
                   <button
                     onClick={() => void handleDelete(material.id)}
@@ -532,17 +681,43 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                     )}
                 </div>
               )}
+
+              {openPages.includes(material.id) && (
+                <PageInspector
+                  pages={pages}
+                  totalPages={material.pageCount ?? (liveRead?.materialId === material.id ? liveRead.total ?? 0 : pages.length)}
+                  live={liveRead !== null && liveRead.materialId === material.id ? liveRead : null}
+                  busyPage={busyPage !== null && busyPage.materialId === material.id ? busyPage.page : null}
+                  onReread={(pageNumber) => void handleVisionPage(material.id, pageNumber)}
+                />
+              )}
             </li>
           );
         })}
         {items.length === 0 && (
-          <li className="rounded-[var(--radius)] border border-dashed border-border-strong bg-surface p-5 text-sm text-text-muted">
+          <li className="row text-sm text-text-muted">
             No material yet. Drop a syllabus, notes or past paper above to see its pages previewed here.
           </li>
         )}
       </ul>
     </div>
   );
+}
+
+const MIME_BY_EXTENSION: Record<string, string> = {
+  pdf: 'application/pdf',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  txt: 'text/plain',
+  md: 'text/markdown',
+};
+
+/** Windows can hand back an empty File.type; fall back to the extension. */
+function mimeFromName(name: string): string {
+  const extension = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
+  return MIME_BY_EXTENSION[extension] ?? 'text/plain';
 }
 
 function RebuildButton({ courseId }: { courseId: string }) {

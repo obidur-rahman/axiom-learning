@@ -157,6 +157,42 @@ export async function replacePages(
   }
 }
 
+/**
+ * Saves one extracted page as soon as it is read. A 56-page scan takes half
+ * an hour; writing only at the end means a failed or stopped read throws away
+ * every page that did work, and the learner cannot see any of them.
+ */
+export async function upsertPage(
+  db: DbDriver,
+  materialId: string,
+  page: Omit<MaterialPage, 'id' | 'materialId'>,
+): Promise<void> {
+  await db.execute(
+    `INSERT INTO material_pages (id, material_id, page_number, text, extraction_method,
+       confidence, low_confidence)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (material_id, page_number) DO UPDATE SET
+       text = excluded.text,
+       extraction_method = excluded.extraction_method,
+       confidence = excluded.confidence,
+       low_confidence = excluded.low_confidence`,
+    [
+      uuid(),
+      materialId,
+      page.pageNumber,
+      page.text,
+      page.extractionMethod,
+      page.confidence,
+      page.lowConfidence ? 1 : 0,
+    ],
+  );
+}
+
+/** Drops every page of a material, before a full re-read writes new ones. */
+export async function clearPages(db: DbDriver, materialId: string): Promise<void> {
+  await db.execute('DELETE FROM material_pages WHERE material_id = $1', [materialId]);
+}
+
 export async function listPages(
   db: DbDriver,
   materialId: string,

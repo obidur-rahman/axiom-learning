@@ -33,11 +33,16 @@ describe('probeCapabilities', () => {
   it('reports chat and jsonMode when the endpoint answers both', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) =>
-        url.includes('/embeddings')
-          ? jsonResponse({ data: [{ index: 0, embedding: [0.1] }] })
-          : jsonResponse(chatBody('{"ok":true}')),
-      ),
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('/embeddings')) {
+          return jsonResponse({ data: [{ index: 0, embedding: [0.1] }] });
+        }
+        // The vision probe sends a solid red image; answer it like a VLM would.
+        if (String(init?.body ?? '').includes('image_url')) {
+          return jsonResponse(chatBody('red'));
+        }
+        return jsonResponse(chatBody('{"ok":true}'));
+      }),
     );
     const caps = await probeCapabilities({ ...config, embedModel: 'e' });
     expect(caps.chat).toBe(true);
@@ -61,6 +66,59 @@ describe('probeCapabilities', () => {
     const caps = await probeCapabilities(config);
     expect(caps.chat).toBe(true);
     expect(caps.jsonMode).toBe(false);
+  });
+
+  it('marks vision false when the model answers without seeing the image', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        String(init?.body ?? '').includes('image_url')
+          ? jsonResponse(chatBody('I cannot view images.'))
+          : jsonResponse(chatBody('{"ok":true}')),
+      ),
+    );
+    const caps = await probeCapabilities(config);
+    expect(caps.chat).toBe(true);
+    expect(caps.vision).toBe(false);
+  });
+
+  it('accepts a hex answer from a model that does see the image', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        String(init?.body ?? '').includes('image_url')
+          ? jsonResponse(chatBody('#FF0000'))
+          : jsonResponse(chatBody('{"ok":true}')),
+      ),
+    );
+    expect((await probeCapabilities(config)).vision).toBe(true);
+  });
+
+  it('reads a reply that a thinking model left in reasoning only', async () => {
+    // qwen3-vl:8b defaults to thinking and spends a small budget entirely on
+    // the scratchpad, returning content: "". The probe must still see the answer.
+    const thinking = (reasoning: string) =>
+      jsonResponse({ choices: [{ message: { content: '', reasoning } }], model: 'vlm' });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) =>
+        String(init?.body ?? '').includes('image_url')
+          ? thinking('The image provided is a solid red color.')
+          : thinking('We are to return exactly the JSON: {"ok":true}'),
+      ),
+    );
+    const caps = await probeCapabilities(config);
+    expect(caps.chat).toBe(true);
+    expect(caps.jsonMode).toBe(true);
+    expect(caps.vision).toBe(true);
+  });
+
+  it('fails chat when the reply holds neither content nor reasoning', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ choices: [{ message: { content: '' } }], model: 'x' })),
+    );
+    expect((await probeCapabilities(config)).chat).toBe(false);
   });
 
   it('skips the embedding probe when no embed model is configured', async () => {

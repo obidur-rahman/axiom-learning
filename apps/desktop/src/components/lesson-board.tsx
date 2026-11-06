@@ -12,12 +12,14 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Sparkles,
   Square,
   Target,
   Volume2,
 } from 'lucide-react';
 import { setWindowFullscreen } from '../lib/fullscreen';
 import { useSpeech } from '../lib/speech';
+import { LessonAnimation } from './lesson-animation';
 import { Markdown } from './markdown';
 import { SectionAsk } from './section-ask';
 
@@ -182,11 +184,14 @@ export function LessonBoard({
   courseId,
   document,
   onRegenerate,
+  onAnimate,
   busy,
 }: {
   courseId: string;
   document: LessonDocument;
   onRegenerate: () => void;
+  /** Ask the pipeline for one animation for this slide, after the fact. */
+  onAnimate?: (beatIndex: number) => void;
   busy: boolean;
 }) {
   const [index, setIndex] = useState(0);
@@ -295,6 +300,22 @@ export function LessonBoard({
           <BlockView key={blockIndex} block={block} large={large} />
         ))}
       </div>
+      {beat.animation !== undefined && beat.animation !== null ? (
+        <div className={large ? 'mt-6' : 'mt-3.5'}>
+          <LessonAnimation animation={beat.animation} large={large} />
+        </div>
+      ) : onAnimate !== undefined ? (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm mt-3.5 self-start"
+          onClick={() => onAnimate(index)}
+          disabled={busy}
+          title="Generate a short animation for this slide's idea"
+        >
+          <Sparkles className="size-3.5" aria-hidden />
+          Animate this idea
+        </button>
+      ) : null}
       {beat.takeaway !== null && (
         <p
           className={

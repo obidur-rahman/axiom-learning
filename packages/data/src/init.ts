@@ -1,5 +1,5 @@
 import type { DbDriver } from './driver';
-import { MIGRATIONS, REBUILD_JOBS_MIGRATION } from './ddl';
+import { MIGRATIONS, PROVIDER_CONFIG_COLUMNS, REBUILD_JOBS_MIGRATION } from './ddl';
 import * as coursesRepo from './courses';
 import * as materialsRepo from './materials';
 import * as roadmapsRepo from './roadmaps';
@@ -9,7 +9,7 @@ import * as questionsRepo from './questions';
 import * as studyRepo from './study';
 import * as lessonDocsRepo from './lesson-docs';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 async function tableExists(driver: DbDriver, name: string): Promise<boolean> {
   const rows = await driver.select<{ name: string }>(
@@ -57,10 +57,25 @@ export async function initDb(driver: DbDriver): Promise<void> {
     version = 2;
   }
 
+  if (version < 3) {
+    await ensureProviderConfigColumns(driver);
+    version = 3;
+  }
+
   await driver.execute(
     `REPLACE INTO schema_meta (key, value) VALUES ('schema_version', $1)`,
     [String(version)],
   );
+}
+
+/** Adds the v3 provider columns to a database that predates them. */
+async function ensureProviderConfigColumns(driver: DbDriver): Promise<void> {
+  const columns = await driver.select<{ name: string }>('PRAGMA table_info(provider_config)');
+  const present = new Set(columns.map((column) => column.name));
+  for (const [name, definition] of PROVIDER_CONFIG_COLUMNS) {
+    if (present.has(name)) continue;
+    await driver.execute(`ALTER TABLE provider_config ADD COLUMN ${name} ${definition}`);
+  }
 }
 
 /** All repositories bound to one driver. */

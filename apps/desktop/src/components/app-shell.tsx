@@ -17,6 +17,8 @@ import { getDb, isDesktopRuntime } from '../lib/db';
 import { initialsOf, savePrefs, usePrefs, type ThemeMode } from '../lib/prefs';
 import { JobIndicator } from './job-indicator';
 import { NotificationCenter } from './notification-center';
+import { OnboardingGate } from './onboarding';
+import { RouteTransition } from './route-transition';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 
 interface NavEntry {
@@ -85,15 +87,18 @@ const THEME_LABEL: Record<ThemeMode, string> = { light: 'Light', dark: 'Dark', s
 function RailTooltip({
   label,
   side = 'right',
+  triggerId,
   children,
 }: {
   label: string;
   side?: 'top' | 'right' | 'bottom' | 'left';
+  /** Stable id: Base UI's generated id shifts between server and hydration. */
+  triggerId: string;
   children: React.ReactElement;
 }) {
   return (
     <Tooltip>
-      <TooltipTrigger render={children} />
+      <TooltipTrigger id={triggerId} render={children} />
       <TooltipContent side={side}>{label}</TooltipContent>
     </Tooltip>
   );
@@ -123,11 +128,15 @@ function ThemeIcon({ mode }: { mode: ThemeMode }) {
   );
 }
 
-function ThemeButton() {
+function ThemeButton({ id }: { id: string }) {
   const prefs = usePrefs();
   const next = THEME_ORDER[(THEME_ORDER.indexOf(prefs.theme) + 1) % THEME_ORDER.length] ?? 'system';
   return (
-    <RailTooltip label={`Theme: ${THEME_LABEL[prefs.theme]} - switch to ${THEME_LABEL[next]}`} side="top">
+    <RailTooltip
+      label={`Theme: ${THEME_LABEL[prefs.theme]} - switch to ${THEME_LABEL[next]}`}
+      side="top"
+      triggerId={id}
+    >
       <button
         type="button"
         onClick={() => savePrefs({ theme: next })}
@@ -218,20 +227,24 @@ function SidebarBody() {
 
   return (
     <>
-      <Link href="/" className="flex items-center gap-3 px-1.5 no-underline">
-        <span
+      <Link href="/" className="flex items-center gap-2.5 px-1.5 no-underline">
+        {/* Both marks ship; the theme decides which one is painted. */}
+        <img
+          src="/icon-dark.png"
+          alt=""
           aria-hidden
-          className="flex size-10 flex-none items-center justify-center rounded-[var(--radius)] border border-border text-accent"
-          style={{
-            background: 'linear-gradient(160deg, var(--color-accent-soft), transparent)',
-            boxShadow: 'inset 0 1px 0 var(--glass-highlight)',
-            borderColor: 'color-mix(in srgb, var(--color-accent) 35%, transparent)',
-          }}
-        >
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
-            <path d="M12 3l2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4z" />
-          </svg>
-        </span>
+          width={40}
+          height={40}
+          className="brand-mark-dark size-10 flex-none object-contain"
+        />
+        <img
+          src="/icon-light.png"
+          alt=""
+          aria-hidden
+          width={40}
+          height={40}
+          className="brand-mark-light size-10 flex-none object-contain"
+        />
         <span className="min-w-0">
           <span className="block text-[15px] font-semibold leading-tight text-rail-text">Axiom</span>
           <span className="block text-[10px] uppercase tracking-[0.2em] text-rail-icon">Learning</span>
@@ -261,7 +274,7 @@ function SidebarBody() {
             </span>
           </Link>
           <NotificationCenter />
-          <ThemeButton />
+          <ThemeButton id="theme-toggle-rail" />
         </div>
       </div>
 
@@ -304,6 +317,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <TooltipProvider>
+      <OnboardingGate />
+      <RouteTransition />
       <div className="flex min-h-screen flex-col md:flex-row">
         <aside className="rail sticky top-0 hidden h-screen w-[258px] flex-none flex-col border-y-0 border-l-0 px-3.5 py-4 md:flex">
           <SidebarBody />
@@ -311,9 +326,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <header className="rail sticky top-0 z-40 flex items-center gap-3 border-x-0 border-t-0 px-3 py-2.5 md:hidden">
           <Link href="/" className="flex items-center gap-2 text-rail-text no-underline">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
-              <path d="M12 3l2.4 6.6L21 12l-6.6 2.4L12 21l-2.4-6.6L3 12l6.6-2.4z" />
-            </svg>
+            <img
+              src="/icon-dark.png"
+              alt=""
+              aria-hidden
+              width={28}
+              height={28}
+              className="brand-mark-dark size-7 flex-none object-contain"
+            />
+            <img
+              src="/icon-light.png"
+              alt=""
+              aria-hidden
+              width={28}
+              height={28}
+              className="brand-mark-light size-7 flex-none object-contain"
+            />
             <span className="text-[14px] font-semibold">Axiom</span>
           </Link>
           <nav aria-label="Main" className="flex flex-1 items-center gap-1 overflow-x-auto">
@@ -335,12 +363,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
           <JobIndicator />
           <NotificationCenter />
-          <ThemeButton />
+          <ThemeButton id="theme-toggle-header" />
         </header>
 
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-7 lg:py-6 2xl:px-9">
-          {/* The content fills everything the sidebar leaves: no centred column. */}
-          <div className="w-full">{children}</div>
+          {/* The content fills everything the sidebar leaves: no centred column.
+              Keyed by path so every route change replays the entrance. */}
+          <div key={pathname} className="route-view w-full">
+            {children}
+          </div>
         </main>
       </div>
     </TooltipProvider>

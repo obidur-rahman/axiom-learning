@@ -33,6 +33,11 @@
   --color-text: #4c4f69;
   --color-text-muted: #6c6f85;
 
+  /* The sheet a parsed page is typeset on. */
+  --color-paper: #fcfcfe;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+    "Noto Serif Bengali", Georgia, "Times New Roman", serif;
+
   /* Accent defaults; [data-accent] blocks below override these. */
   --color-accent: #8839ef;
   --color-accent-2: #ea76cb;
@@ -112,6 +117,8 @@
   --color-border-strong: rgba(205, 214, 244, 0.27);
   --color-text: #cdd6f4;
   --color-text-muted: #a6adc8;
+
+  --color-paper: #1f1f2e;
 
   --color-accent: #cba6f7;
   --color-accent-2: #f5c2e7;
@@ -407,6 +414,15 @@ body {
   border-color: rgba(255, 255, 255, 0.08);
   color: var(--color-rail-text);
 }
+
+/* ---------- Brand mark ---------- */
+/* icon-dark is the saturated mark for the light theme; icon-light is the pale
+   one for the dark theme. The learner picks the theme, not the OS, so the swap
+   follows data-theme rather than a prefers-color-scheme query. */
+.brand-mark-dark { display: block; }
+.brand-mark-light { display: none; }
+[data-theme='dark'] .brand-mark-dark { display: none; }
+[data-theme='dark'] .brand-mark-light { display: block; }
 
 /* ---------- Buttons ---------- */
 .btn {
@@ -704,6 +720,12 @@ body {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+/* A finished build is not an alarm: the same badge, in the accent colour.
+   It turns red only while something has failed. */
+.notif-badge[data-tone='ok'] {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast, #ffffff);
+}
 .notif-panel {
   position: fixed;
   right: 16px;
@@ -990,6 +1012,14 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
 }
+/* A malformed formula must read as source text, not as an alarming red error. */
+.katex-error {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  white-space: pre-wrap;
+}
+
 .markdown-inline {
   display: inline;
 }
@@ -1296,6 +1326,11 @@ body {
 .lesson-stage[data-present='true'] .deck-controls { margin-top: auto; }
 
 /* Full-screen teaching board (lesson-board Present). */
+.present-stage {
+  /* Opaque on its own: bg-panel is translucent, which let the page bleed
+     through the lesson while presenting. */
+  background: var(--color-panel-solid);
+}
 .present-title {
   margin-top: 14px;
   font-size: clamp(30px, 3.6vw, 48px);
@@ -1349,6 +1384,44 @@ html[data-reduce-motion='true'] .lesson-stage { animation: none; }
 @keyframes shimmer {
   to { transform: translateX(100%); }
 }
+
+/* ---------- Route transition ---------- */
+/* Painted the instant an in-app link is followed, so a pending route never
+   looks like a dead click. The bar creeps while the next screen loads. */
+.route-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 2px;
+  z-index: 90;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 220ms var(--ease);
+}
+.route-progress[data-active='true'] { opacity: 1; }
+.route-progress-bar {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-2));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-accent) 55%, transparent);
+  transition: transform 260ms var(--ease);
+}
+
+/* Each route settles in instead of snapping. Opacity only, deliberately: a
+   transform here becomes the containing block for `position: fixed`, which
+   trapped lesson Present/full-screen overlays inside the page column. */
+.route-view { animation: route-view-in 220ms var(--ease) both; }
+@keyframes route-view-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-view { animation: none; }
+}
+html[data-reduce-motion='true'] .route-view { animation: none; }
 
 .anchor-target { scroll-margin-top: 24px; }
 
@@ -1577,3 +1650,138 @@ select optgroup {
 .markdown-compact ol { margin: 0.4rem 0; }
 .markdown-compact li { margin: 0.15rem 0; }
 .markdown-compact table { margin: 0.5rem 0; }
+
+/* ---------- Parsed page document ---------- */
+/*
+ * Text read from a page is a document, not a card: a sheet on paper with a
+ * readable measure, serif body and KaTeX maths, flowing at full height so the
+ * learner scrolls the page instead of a box inside it.
+ */
+.parsed-document {
+  width: min(100%, 820px);
+  margin-inline: auto;
+  padding: clamp(26px, 4.2vw, 58px) clamp(20px, 4vw, 64px);
+  background: var(--color-paper);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  box-shadow: 0 20px 50px -34px rgb(17 17 27 / 0.55);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.parsed-document .markdown {
+  max-width: 68ch;
+  margin-inline: auto;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.parsed-document .markdown p { margin: 0.7rem 0; }
+.parsed-document .markdown h1 {
+  margin: 0 0 1rem;
+  font-size: 1.55rem;
+  line-height: 1.2;
+}
+.parsed-document .markdown h2 {
+  margin: 1.6rem 0 0.55rem;
+  font-size: 1.28rem;
+  line-height: 1.3;
+}
+.parsed-document .markdown h3 { margin: 1.3rem 0 0.4rem; font-size: 1.1rem; }
+.parsed-document .markdown h4 { margin: 1.1rem 0 0.35rem; font-size: 1rem; }
+.parsed-document .markdown ul,
+.parsed-document .markdown ol { margin: 0.7rem 0; padding-left: 1.4rem; }
+.parsed-document .markdown li { margin: 0.22rem 0; }
+.parsed-document .markdown li::marker { color: var(--color-text-muted); }
+.parsed-document .markdown .katex-display { margin: 1.15rem 0; }
+.parsed-document .markdown table { font-size: 0.92em; }
+.parsed-document .markdown blockquote {
+  margin: 1rem 0;
+  padding: 0.1rem 0 0.1rem 1rem;
+  border-left: 2px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+}
+.parsed-document-empty {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+}
+
+/* ---------- Lesson animation ---------- */
+/* Generated pages come from the model, so they run in a sandboxed iframe. */
+.lesson-animation {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: #14141f;
+}
+.lesson-animation-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  background: #14141f;
+}
+.lesson-animation-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 9px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.lesson-animation-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.lesson-animation-lg .lesson-animation-title { font-size: 12px; }
+
+/* ---------- PDF export sheet ---------- */
+/* Captured off screen by html2canvas; A4 width at 96 dpi, paper margins. */
+.pdf-sheet {
+  box-sizing: border-box;
+  width: 794px;
+  padding: 54px 56px;
+  background: #ffffff;
+  color: #111111;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.7;
+}
+.pdf-sheet .export-title { margin: 0 0 24px; font-size: 26px; line-height: 1.2; color: #111111; }
+.pdf-sheet .export-page-number {
+  margin: 0 0 16px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #666666;
+}
+.pdf-sheet .export-page + .export-page { margin-top: 30px; }
+.pdf-sheet .parsed-document {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  color: #111111;
+}
+.pdf-sheet .parsed-document .markdown { max-width: none; }
+.pdf-sheet .markdown .katex-display { overflow: visible; }
+.pdf-sheet h1, .pdf-sheet h2, .pdf-sheet h3, .pdf-sheet h4 { color: #111111; }
+.pdf-sheet a { color: #111111; text-decoration: none; }
+.pdf-sheet table, .pdf-sheet th, .pdf-sheet td { border-color: #999999; }

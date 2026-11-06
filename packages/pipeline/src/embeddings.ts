@@ -1,4 +1,4 @@
-import type { ProviderConfig } from '@axiom/ai';
+import { beforeModelCall, type ProviderConfig } from '@axiom/ai';
 import { listEmbeddings, replaceEmbeddings, type DbDriver } from '@axiom/data';
 import { retrievePages } from './tutor';
 
@@ -24,6 +24,9 @@ export async function embedTexts(
   const batches: number[][] = [];
   for (let offset = 0; offset < texts.length; offset += 16) {
     const chunk = texts.slice(offset, offset + 16);
+    // Swaps the local model set: the embedding model is the only one loaded
+    // while vectors are computed.
+    await beforeModelCall(config.embedModel, 'embed');
     const response = await fetchImpl(`${config.baseUrl}/embeddings`, {
       method: 'POST',
       headers: {

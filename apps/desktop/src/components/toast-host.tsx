@@ -12,6 +12,7 @@ interface ToastEntry {
 }
 
 const DONE_COPY: Record<string, { title: string; body: string }> = {
+  read_material: { title: 'Material read', body: 'The pages are ready. Topics are extracted next.' },
   build_topics: { title: 'Topics extracted', body: 'Review them in Topics & scope, then rebuild the roadmap.' },
   build_roadmap: { title: 'Roadmap rebuilt', body: 'The new ordered plan is ready on the Roadmap tab.' },
   build_lesson: { title: 'Lesson ready', body: 'Open Lessons to read it with citations.' },

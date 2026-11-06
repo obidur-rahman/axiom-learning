@@ -20,7 +20,7 @@ const SECTIONS = [
   { id: 'profile', label: 'Profile' },
   { id: 'study', label: 'Study' },
   { id: 'materials', label: 'Materials' },
-  { id: 'provider', label: 'AI provider' },
+  { id: 'provider', label: 'AI models' },
   { id: 'data', label: 'Data' },
   { id: 'account', label: 'Account' },
   { id: 'about', label: 'About' },
@@ -123,8 +123,8 @@ export default function SettingsPage() {
 
           <SettingsSection
             id="provider"
-            title="AI provider"
-            description="One OpenAI-compatible endpoint powers lessons, the tutor, practice and topic extraction."
+            title="AI models"
+            description="One endpoint, three roles: a vision model for page images, a chat model for lessons and the tutor, an embedding model for retrieval. Suggested models can be downloaded here."
           >
             <SettingsForm />
           </SettingsSection>

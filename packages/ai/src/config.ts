@@ -10,8 +10,20 @@ export const ProviderConfigSchema = z.object({
   apiKey: z.string().optional(),
   /** Model used for chat, tutoring, lessons. */
   chatModel: z.string().min(1),
+  /**
+   * Model that reads page images (handwriting, scans, diagrams). Optional:
+   * without it, the chat model is used, which wastes a text model on images.
+   */
+  ocrModel: z.string().optional(),
   /** Model used for embeddings. Optional: without it, search falls back to keyword only. */
   embedModel: z.string().optional(),
+  /** Local thinking models: keep the scratchpad on for OCR only when it helps. */
+  chatThink: z.boolean().optional(),
+  ocrThink: z.boolean().optional(),
+  /** Long edge of the page image sent to the OCR model, in pixels. */
+  ocrMaxEdge: z.number().int().min(512).max(4096).optional(),
+  /** Caps the transcription reply so a runaway model cannot stall a page. */
+  ocrMaxTokens: z.number().int().min(128).max(8192).optional(),
 });
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;

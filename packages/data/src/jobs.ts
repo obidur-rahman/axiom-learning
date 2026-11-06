@@ -83,6 +83,23 @@ export async function claimNext(db: DbDriver, now = new Date().toISOString()): P
   return { ...rowToJob(candidate), status: 'running', attempts: candidate.attempts + 1 };
 }
 
+/**
+ * Stops a job the learner cancelled. Written as 'failed' because that is the
+ * only terminal status the schema allows, but it deliberately bypasses
+ * fail(): a stopped job must never be retried behind the learner's back.
+ */
+export async function cancelJob(
+  db: DbDriver,
+  jobId: string,
+  message = 'Stopped by you.',
+): Promise<void> {
+  await db.execute(
+    `UPDATE jobs SET status = 'failed', finished_at = $2, last_error = $3
+     WHERE id = $1 AND status IN ('queued','running')`,
+    [jobId, new Date().toISOString(), message],
+  );
+}
+
 export async function complete(db: DbDriver, jobId: string): Promise<void> {
   await db.execute(
     `UPDATE jobs SET status = 'done', finished_at = $2, last_error = NULL WHERE id = $1`,

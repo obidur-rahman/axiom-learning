@@ -80,6 +80,10 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
         if (event.kind === 'lesson-ready' && event.courseId === courseId && event.topicId === topicId) {
           void loadLesson(topicId, depth);
         }
+        // Slides are saved one at a time; show each as it lands.
+        if (event.kind === 'lesson-progress' && event.courseId === courseId && event.topicId === topicId) {
+          void loadLesson(topicId, depth);
+        }
         if (
           event.kind === 'job-progress' &&
           event.jobKind === 'build_lesson' &&
@@ -115,6 +119,25 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
       setBusy(false);
     }
   }, [courseId, topicId, depth, busy]);
+
+  /** One slide's animation, without rebuilding the rest of the lesson. */
+  const animateBeat = useCallback(
+    async (beatIndex: number) => {
+      if (lesson === null || topicId === '' || busy) return;
+      setBusy(true);
+      setMessage('Generating an animation for this slide...');
+      try {
+        const db = await getDb();
+        await enqueue(db.driver, 'build_lesson', {
+          courseId,
+          payload: { topicId, depth, lessonId: lesson.id, animateBeat: beatIndex },
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [courseId, topicId, depth, lesson, busy],
+  );
 
   const flag = useCallback(async () => {
     if (lesson === null) return;
@@ -227,7 +250,13 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
               </h2>
               <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <span className="chip">{depth === 'core' ? 'Full lesson' : 'Quick recap'}</span>
-                <span className="chip">{document === null ? `${slides.length} slides` : `${document.beats.length} teaching beats`}</span>
+                <span className="chip">
+                  {document === null
+                    ? `${slides.length} slides`
+                    : document.plannedBeats !== undefined && document.beats.length < document.plannedBeats
+                      ? `${document.beats.length} of ${document.plannedBeats} slides`
+                      : `${document.beats.length} teaching beats`}
+                </span>
                 {questions.length > 0 && <span className="chip">{questions.length} check questions</span>}
               </p>
             </div>
@@ -273,12 +302,23 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
             </div>
           </div>
 
+          {document !== null &&
+            document.plannedBeats !== undefined &&
+            document.beats.length < document.plannedBeats && (
+              <p className="text-[12.5px] text-text-muted" aria-live="polite">
+                {document.beats.length === 0
+                  ? `Planning ${document.plannedBeats} slides...`
+                  : `Slide ${document.beats.length} of ${document.plannedBeats} ready - the rest keep writing while you read.`}
+              </p>
+            )}
+
           {view === 'board' && document !== null ? (
             <LessonBoard
               key={lesson.id}
               courseId={courseId}
               document={document}
               onRegenerate={() => void generate()}
+              onAnimate={(beatIndex) => void animateBeat(beatIndex)}
               busy={busy}
             />
           ) : view === 'slides' ? (
@@ -292,6 +332,7 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
               onAnswer={setAnswer}
               shown={shown}
               onShowAnswer={showAnswer}
+              animations={document?.beats.map((beat) => beat.animation ?? null)}
             />
           ) : (
             <article className="rounded-[var(--radius-card)] border border-border bg-panel p-5 sm:p-6">

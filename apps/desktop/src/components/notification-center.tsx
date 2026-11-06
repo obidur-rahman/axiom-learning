@@ -146,6 +146,7 @@ export function NotificationCenter() {
     }
   }, [refresh]);
 
+  const total = rows.length;
   const failures = rows.filter((row) => row.status === 'failed').length;
   const hasFinished = rows.some((row) => row.status === 'done');
 
@@ -161,9 +162,9 @@ export function NotificationCenter() {
         aria-expanded={open}
         aria-controls="notification-panel"
         aria-label={
-          failures > 0
-            ? `Notifications, ${failures} failed build${failures === 1 ? '' : 's'}`
-            : 'Notifications'
+          total === 0
+            ? 'Notifications'
+            : `Notifications, ${total}${failures > 0 ? `, ${failures} failed` : ''}`
         }
         className="notif-trigger flex size-9 items-center justify-center rounded-[var(--radius)] text-rail-icon transition-colors duration-150 hover:bg-rail-active hover:text-rail-text"
       >
@@ -181,9 +182,13 @@ export function NotificationCenter() {
           <path d="M18 8a6 6 0 0 0-12 0c0 6-2 7-2 7h16s-2-1-2-7" />
           <path d="M10.3 20a2 2 0 0 0 3.4 0" />
         </svg>
-        {failures > 0 && (
-          <span aria-hidden className="notif-badge">
-            {failures > 9 ? '9+' : failures}
+        {total > 0 && (
+          <span
+            aria-hidden
+            className="notif-badge"
+            data-tone={failures > 0 ? 'danger' : 'ok'}
+          >
+            {total > 9 ? '9+' : total}
           </span>
         )}
       </button>

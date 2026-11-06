@@ -393,6 +393,14 @@ export function StudySettings() {
         <span className="text-[12px] text-text-muted">The Lessons tab opens with this depth; switch per lesson any time.</span>
       </div>
 
+      <Toggle
+        id="pref-animations"
+        label="Animate complex ideas"
+        description="When a beat asks for it, the model writes a short animation that plays inside the lesson. Most beats stay text."
+        checked={prefs.lessonAnimations}
+        onCheckedChange={(lessonAnimations) => savePrefs({ lessonAnimations })}
+      />
+
       <div className="py-3">
         <div className="flex items-baseline justify-between gap-3">
           <p className="text-[13px] font-medium">Bridge depth for new courses</p>

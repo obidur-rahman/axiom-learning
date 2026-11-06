@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { pendingJobCount } from '@axiom/data';
 import { onAppEvent } from '../lib/events';
 import { getDb, isDesktopRuntime } from '../lib/db';
+import { cancelRunningJob } from '../lib/job-control';
 import { ProgressBar } from './progress-bar';
 
 export const JOB_LABEL: Record<string, string> = {
@@ -46,7 +47,11 @@ export function JobIndicator() {
 
   useEffect(() => {
     void refreshQueue();
-    return onAppEvent((event) => {
+    // Queued work is real work even when no event reaches this screen: poll the
+    // queue so the rail never sits empty while the worker grinds through a
+    // backlog, and so a job waiting on a retry stays visible.
+    const poll = setInterval(() => void refreshQueue(), 2_000);
+    const unsubscribe = onAppEvent((event) => {
       if (event.kind === 'job-progress') {
         setLive((current) =>
           current !== null && current.jobId === event.jobId
@@ -62,19 +67,33 @@ export function JobIndicator() {
         return;
       }
       if (event.kind !== 'job-updated') return;
-      if (event.status === 'running') {
-        setLive({
-          jobId: event.jobId,
-          kind: event.jobKind,
-          percent: null,
-          message: 'Starting',
-          startedAt: Date.now(),
-        });
+      if (event.status === 'queued' || event.status === 'running') {
+        const queuedMessage = event.error ?? 'Queued';
+        const message = event.status === 'queued' ? queuedMessage : 'Starting';
+        setLive((current) =>
+          current !== null && current.jobId === event.jobId
+            ? {
+                ...current,
+                percent: event.status === 'queued' ? null : current.percent,
+                message: event.status === 'queued' ? queuedMessage : current.message,
+              }
+            : {
+                jobId: event.jobId,
+                kind: event.jobKind,
+                percent: null,
+                message,
+                startedAt: Date.now(),
+              },
+        );
       } else {
         setLive((current) => (current !== null && current.jobId === event.jobId ? null : current));
       }
       void refreshQueue();
     });
+    return () => {
+      clearInterval(poll);
+      unsubscribe();
+    };
   }, [refreshQueue]);
 
   useEffect(() => {
@@ -93,9 +112,21 @@ export function JobIndicator() {
       <span className="activity-head">
         <span aria-hidden className="activity-dot" />
         <span className="truncate">{live === null ? label : `${label}...`}</span>
-        {live?.percent !== null && live !== null && (
-          <span className="num ml-auto text-[10.5px] text-text-muted">{Math.round(live.percent)}%</span>
-        )}
+        <span className="ml-auto flex flex-none items-center gap-2">
+          {live !== null && live.percent !== null && (
+            <span className="num text-[10.5px] text-text-muted">{Math.round(live.percent)}%</span>
+          )}
+          {live !== null && (
+            <button
+              type="button"
+              onClick={() => cancelRunningJob(live.jobId)}
+              className="text-[10.5px] text-rail-text underline decoration-dotted underline-offset-2 hover:text-danger"
+              title="Stop this step"
+            >
+              Stop
+            </button>
+          )}
+        </span>
       </span>
       <ProgressBar
         indeterminate={live === null || live.percent === null}

@@ -70,11 +70,16 @@ export interface Prefs {
   showSkippedInPlan: boolean;
   tutorGuideDefault: boolean;
   autoKnownOnStrongScore: boolean;
+  /* Setup */
+  /** False until the first-run model setup has been completed or skipped. */
+  onboarded: boolean;
   /* Materials */
   jobToasts: boolean;
   autoRebuildRoadmap: boolean;
   autoEmbedPages: boolean;
   flagLowConfidence: boolean;
+  /* Lessons */
+  lessonAnimations: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -99,10 +104,12 @@ export const DEFAULT_PREFS: Prefs = {
   showSkippedInPlan: false,
   tutorGuideDefault: false,
   autoKnownOnStrongScore: false,
+  onboarded: false,
   jobToasts: true,
   autoRebuildRoadmap: true,
   autoEmbedPages: true,
   flagLowConfidence: true,
+  lessonAnimations: true,
 };
 
 let cache: Prefs | null = null;
@@ -170,10 +177,12 @@ function sanitize(raw: unknown): Prefs {
     showSkippedInPlan: bool(value.showSkippedInPlan, DEFAULT_PREFS.showSkippedInPlan),
     tutorGuideDefault: bool(value.tutorGuideDefault, DEFAULT_PREFS.tutorGuideDefault),
     autoKnownOnStrongScore: bool(value.autoKnownOnStrongScore, DEFAULT_PREFS.autoKnownOnStrongScore),
+    onboarded: bool(value.onboarded, DEFAULT_PREFS.onboarded),
     jobToasts: bool(value.jobToasts, DEFAULT_PREFS.jobToasts),
     autoRebuildRoadmap: bool(value.autoRebuildRoadmap, DEFAULT_PREFS.autoRebuildRoadmap),
     autoEmbedPages: bool(value.autoEmbedPages, DEFAULT_PREFS.autoEmbedPages),
     flagLowConfidence: bool(value.flagLowConfidence, DEFAULT_PREFS.flagLowConfidence),
+    lessonAnimations: bool(value.lessonAnimations, DEFAULT_PREFS.lessonAnimations),
   };
 }
 

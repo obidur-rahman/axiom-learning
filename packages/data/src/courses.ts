@@ -115,3 +115,75 @@ export async function updateCourse(
 export async function deleteCourse(db: DbDriver, courseId: string): Promise<void> {
   await db.execute('DELETE FROM courses WHERE id = $1', [courseId]);
 }
+
+/**
+ * Clears everything a course produced, but keeps the course itself: material
+ * files and pages, topics, weights and edges, roadmaps, lessons, questions,
+ * attempts, progress and queued jobs. Title, level, language, exam date and
+ * the learner's study profile/daily minutes survive, so a reset course is
+ * ready for a fresh upload.
+ *
+ * Children are deleted explicitly (not only through cascades) so the reset
+ * also works on a connection where SQLite foreign keys are off.
+ */
+export async function resetCourse(db: DbDriver, courseId: string): Promise<void> {
+  // Any lesson that belongs to this course, directly or through one of its
+  // topics. The topic arm matters for a shared lesson linked to a topic.
+  const courseLessons = `SELECT id FROM lessons WHERE course_id = $1
+     OR topic_id IN (SELECT id FROM topics WHERE course_id = $1)`;
+
+  const statements: [sql: string, params: unknown[]][] = [
+    ['DELETE FROM jobs WHERE course_id = $1', [courseId]],
+    ['DELETE FROM study_attempts WHERE course_id = $1', [courseId]],
+    [
+      `DELETE FROM exam_question_topics WHERE question_id IN
+         (SELECT id FROM exam_questions WHERE course_id = $1)`,
+      [courseId],
+    ],
+    ['DELETE FROM exam_questions WHERE course_id = $1', [courseId]],
+    [`DELETE FROM lesson_documents WHERE lesson_id IN (${courseLessons})`, [courseId]],
+    [`DELETE FROM lesson_reports WHERE lesson_id IN (${courseLessons})`, [courseId]],
+    [
+      `DELETE FROM lessons WHERE course_id = $1
+         OR topic_id IN (SELECT id FROM topics WHERE course_id = $1)`,
+      [courseId],
+    ],
+    ['DELETE FROM user_progress WHERE course_id = $1', [courseId]],
+    ['DELETE FROM node_overrides WHERE course_id = $1', [courseId]],
+    [
+      `DELETE FROM roadmap_nodes WHERE roadmap_version_id IN
+         (SELECT id FROM roadmap_versions WHERE course_id = $1)`,
+      [courseId],
+    ],
+    ['DELETE FROM roadmap_versions WHERE course_id = $1', [courseId]],
+    ['DELETE FROM exam_scope_rules WHERE course_id = $1', [courseId]],
+    ['DELETE FROM topic_edges WHERE course_id = $1', [courseId]],
+    ['DELETE FROM topic_weights WHERE course_id = $1', [courseId]],
+    ['DELETE FROM topics WHERE course_id = $1', [courseId]],
+    [
+      `DELETE FROM material_embeddings WHERE material_id IN
+         (SELECT id FROM materials WHERE course_id = $1)`,
+      [courseId],
+    ],
+    [
+      `DELETE FROM material_pages WHERE material_id IN
+         (SELECT id FROM materials WHERE course_id = $1)`,
+      [courseId],
+    ],
+    ['DELETE FROM materials WHERE course_id = $1', [courseId]],
+  ];
+
+  for (const [sql, params] of statements) {
+    await db.execute(sql, params);
+  }
+
+  await db.execute("UPDATE courses SET status = 'draft' WHERE id = $1", [courseId]);
+  // The learner keeps their study profile and daily time, but past papers are
+  // gone with the material; the plan version advances so it is rebuilt.
+  await db.execute(
+    `UPDATE course_study_settings
+     SET has_past_papers = 0, plan_version = plan_version + 1, updated_at = $2
+     WHERE course_id = $1`,
+    [courseId, new Date().toISOString()],
+  );
+}

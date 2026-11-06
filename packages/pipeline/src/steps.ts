@@ -21,6 +21,8 @@ export interface RunContext {
   db: AxiomDb;
   course: Course;
   config: () => Promise<ProviderConfig | null>;
+  /** Aborts the in-flight model request when the learner stops the job. */
+  signal?: AbortSignal;
 }
 
 export class PipelineError extends Error {
@@ -77,7 +79,13 @@ export async function boundedModelTask<T>(
         { role: 'system', content: prompt.system },
         { role: 'user', content: userContent },
       ],
-      { retries: 2, temperature: options.temperature ?? 0, maxTokens: options.maxTokens },
+      {
+        retries: 2,
+        temperature: options.temperature ?? 0,
+        maxTokens: options.maxTokens,
+        ...(config.chatThink === undefined ? {} : { think: config.chatThink }),
+        ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
+      },
     ));
   } catch (error) {
     // Schema-validated failures after the retry budget surface as a schema

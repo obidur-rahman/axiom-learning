@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getCourse, type Course } from '@axiom/data';
+import { getCourse, resetCourse, type Course } from '@axiom/data';
 import { UploadPanel } from './upload-panel';
 import { StudyPanel } from './study-panel';
 import { TopicsPanel } from './topics-panel';
@@ -12,7 +12,8 @@ import { TutorPanel } from './tutor-panel';
 import { PracticePanel } from './practice-panel';
 import { ProgressPanel } from './progress-panel';
 import { getDb } from '../lib/db';
-import { languageLabel, loadPrefs, type CourseTab } from '../lib/prefs';
+import { cancelRunningJob, runningJobId } from '../lib/job-control';
+import { loadPrefs, type CourseTab } from '../lib/prefs';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
 const TABS: { kind: CourseTab; label: string; hint: string }[] = [
@@ -47,6 +48,8 @@ function CourseTabs() {
   const courseId = params.get('id') ?? '';
   const [course, setCourse] = useState<Course | null>(null);
   const [missing, setMissing] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState('');
   const [tab, setTab] = useState<CourseTab>(() => {
     const requested = params.get('tab');
     return TABS.some((entry) => entry.kind === requested) ? (requested as CourseTab) : 'material';
@@ -81,6 +84,42 @@ function CourseTabs() {
     void load();
   }, [load]);
 
+  /**
+   * Wipes the course's material and everything generated from it, but keeps
+   * the course row itself. The worker is stopped first if it is working on
+   * this course, otherwise it could finish a step against deleted rows.
+   */
+  const handleReset = useCallback(async () => {
+    if (resetting) return;
+    const confirmed = window.confirm(
+      `Reset "${course?.title ?? 'this course'}"?\n\n` +
+        'Every material, page, topic, roadmap, lesson, practice question, attempt and progress record ' +
+        'in this course will be deleted. The course itself stays, with its title, exam date and study settings.\n\n' +
+        'This cannot be undone.',
+    );
+    if (!confirmed) return;
+    setResetting(true);
+    setResetError('');
+    try {
+      const db = await getDb();
+      const running = runningJobId();
+      if (running !== null) {
+        const rows = await db.driver.select<{ course_id: string | null }>(
+          'SELECT course_id FROM jobs WHERE id = $1',
+          [running],
+        );
+        if (rows[0]?.course_id === courseId) cancelRunningJob(running);
+      }
+      await resetCourse(db.driver, courseId);
+      // A full navigation, not a tab switch: every tab keeps mounted state and
+      // must not keep showing material that no longer exists.
+      window.location.assign(`/course?id=${courseId}&tab=material`);
+    } catch (error) {
+      setResetError(error instanceof Error ? error.message : String(error));
+      setResetting(false);
+    }
+  }, [course?.title, courseId, resetting]);
+
   if (missing) {
     return (
       <div className="card mx-auto w-full max-w-2xl p-8">
@@ -114,18 +153,31 @@ function CourseTabs() {
         <p className="chip">{active.hint}</p>
       </div>
 
-      <header>
-        <h1 className="page-title">{course.title}</h1>
-        <p className="mt-2 flex flex-wrap items-center gap-1">
-          <span className="chip">{course.level}</span>
-          <span className="chip">
-            {languageLabel(course.language)}
-          </span>
-          <span className="chip">{course.status}</span>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          {/* Level, language and status were settled when the course was
+              created; repeating them here tells the learner nothing new. The
+              exam date stays because it is a deadline, not a setting. */}
+          <h1 className="page-title">{course.title}</h1>
           {course.examDate !== null && (
-            <span className="chip">Exam {course.examDate.slice(0, 10)}</span>
+            <p className="mt-2">
+              <span className="chip">Exam {course.examDate.slice(0, 10)}</span>
+            </p>
           )}
-        </p>
+          {resetError !== '' && (
+            <p className="mt-2 text-sm text-danger" role="alert">{resetError}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleReset()}
+          disabled={resetting}
+          aria-busy={resetting}
+          className="btn btn-danger btn-sm shrink-0"
+          title="Delete this course's material, roadmap, lessons, practice and progress. The course itself stays."
+        >
+          {resetting ? 'Resetting...' : 'Reset course'}
+        </button>
       </header>
 
       <Tabs
@@ -148,30 +200,32 @@ function CourseTabs() {
           ))}
         </TabsList>
         {/* keepMounted: a running lesson, a tutor thread and a practice set
-            survive a trip to another tab and come back exactly as they were. */}
-        <TabsContent value="material" keepMounted className="mt-3">
-          <div className="card p-5"><UploadPanel courseId={courseId} /></div>
+            survive a trip to another tab and come back exactly as they were.
+            No card wrapper: the section belongs to the page after the tab bar,
+            and nesting it inside another panel put every list two levels in. */}
+        <TabsContent value="material" keepMounted className="mt-4">
+          <UploadPanel courseId={courseId} />
         </TabsContent>
-        <TabsContent value="study" keepMounted className="mt-3">
-          <div className="card p-4 sm:p-5"><StudyPanel courseId={courseId} examDate={course.examDate} /></div>
+        <TabsContent value="study" keepMounted className="mt-4">
+          <StudyPanel courseId={courseId} examDate={course.examDate} />
         </TabsContent>
-        <TabsContent value="topics" keepMounted className="mt-3">
-          <div className="card p-5"><TopicsPanel courseId={courseId} /></div>
+        <TabsContent value="topics" keepMounted className="mt-4">
+          <TopicsPanel courseId={courseId} />
         </TabsContent>
-        <TabsContent value="roadmap" keepMounted className="mt-3">
-          <div className="card p-5"><RoadmapPanel courseId={courseId} /></div>
+        <TabsContent value="roadmap" keepMounted className="mt-4">
+          <RoadmapPanel courseId={courseId} />
         </TabsContent>
-        <TabsContent value="lessons" keepMounted className="mt-3">
-          <div className="card p-4 sm:p-5"><LessonsPanel courseId={courseId} /></div>
+        <TabsContent value="lessons" keepMounted className="mt-4">
+          <LessonsPanel courseId={courseId} />
         </TabsContent>
-        <TabsContent value="tutor" keepMounted className="mt-3">
-          <div className="card p-5"><TutorPanel courseId={courseId} /></div>
+        <TabsContent value="tutor" keepMounted className="mt-4">
+          <TutorPanel courseId={courseId} />
         </TabsContent>
-        <TabsContent value="practice" keepMounted className="mt-3">
-          <div className="card p-5"><PracticePanel courseId={courseId} /></div>
+        <TabsContent value="practice" keepMounted className="mt-4">
+          <PracticePanel courseId={courseId} />
         </TabsContent>
-        <TabsContent value="progress" keepMounted className="mt-3">
-          <div className="card p-5"><ProgressPanel courseId={courseId} /></div>
+        <TabsContent value="progress" keepMounted className="mt-4">
+          <ProgressPanel courseId={courseId} />
         </TabsContent>
       </Tabs>
     </div>

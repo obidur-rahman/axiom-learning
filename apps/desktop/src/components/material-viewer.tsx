@@ -24,6 +24,7 @@ import {
 import { getDb } from '../lib/db';
 import { setWindowFullscreen } from '../lib/fullscreen';
 import { openPdfDocument, type PdfDocumentHandle, type PdfPageSize } from '../lib/preview';
+import { Markdown } from './markdown';
 import { WorkProgress, type WorkState } from './work-progress';
 
 const MIN_ZOOM = 0.5;
@@ -830,9 +831,15 @@ export function MaterialViewer() {
                         </span>
                       )}
                     </p>
-                    <p className="mt-2 max-h-[340px] overflow-auto whitespace-pre-wrap text-[12.5px] leading-relaxed">
-                      {activeText.text ?? 'No text was read from this page.'}
-                    </p>
+                    <div className="mt-2 max-h-[340px] overflow-auto">
+                      {activeText.text === null ? (
+                        <p className="text-[12.5px] text-text-muted">No text was read from this page.</p>
+                      ) : (
+                        // Read with the same renderer as the page inspector, so
+                        // LaTeX reads as maths here too.
+                        <Markdown content={activeText.text} compact className="text-[12.5px]" />
+                      )}
+                    </div>
                   </div>
                 )}
               </>

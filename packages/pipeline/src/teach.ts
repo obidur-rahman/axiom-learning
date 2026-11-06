@@ -3,6 +3,7 @@ import {
   getLessonDocument,
   saveActiveLesson,
   saveLessonDocument,
+  type LessonAnimation,
   type LessonBeat,
   type LessonBeatKind,
   type LessonBlock,
@@ -10,7 +11,7 @@ import {
 } from '@axiom/data';
 import { retrievePagesSmart } from './embeddings';
 import { retrievePages } from './tutor';
-import { LESSON_OBJECTIVE, TEACH_BEAT, TEACH_CRITIC } from './prompts';
+import { ANIMATION_SCRIPT, LESSON_OBJECTIVE, LESSON_PLAN, TEACH_BEAT, TEACH_CRITIC } from './prompts';
 import { boundedModelTask, type RunContext } from './steps';
 
 /**
@@ -22,11 +23,11 @@ import { boundedModelTask, type RunContext } from './steps';
 
 const BlockSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string().min(1) }),
-  z.object({ type: z.literal('steps'), items: z.array(z.string().min(1)).min(2).max(12) }),
+  z.object({ type: z.literal('steps'), items: z.array(z.string().min(1)).min(2).max(20) }),
   z.object({
     type: z.literal('compare'),
-    columns: z.array(z.string().min(1)).min(2).max(5),
-    rows: z.array(z.array(z.string())).min(1).max(12),
+    columns: z.array(z.string().min(1)).min(2).max(6),
+    rows: z.array(z.array(z.string())).min(1).max(20),
   }),
   z.object({ type: z.literal('equation'), latex: z.string().min(1), label: z.string().optional() }),
   z.object({
@@ -54,9 +55,14 @@ const BlockSchema = z.discriminatedUnion('type', [
 const BeatSchema = z.object({
   title: z.string().min(2),
   intro: z.string().min(1),
-  blocks: z.array(BlockSchema).min(1).max(4),
+  blocks: z.array(BlockSchema).min(1).max(8),
   takeaway: z.string().nullable().optional(),
   check: z.object({ prompt: z.string().min(1), answer: z.string().min(1) }).nullable().optional(),
+  /** Ask for a visual only when the beat genuinely needs one. */
+  animation: z
+    .object({ needed: z.boolean(), brief: z.string().max(400).default('') })
+    .nullable()
+    .optional(),
   citationPages: z.array(z.number().int().min(1)).max(20).default([]),
 });
 
@@ -64,6 +70,28 @@ const ObjectiveSchema = z.object({
   objective: z.string().min(3),
   why: z.string().min(3),
 });
+
+const PlanSchema = z.object({
+  beats: z
+    .array(
+      z.object({
+        kind: z.enum([
+          'hook',
+          'intuition',
+          'worked',
+          'contrast',
+          'note_anchor',
+          'recall',
+          'exam_shape',
+        ]),
+        focus: z.string().min(1).max(400),
+      }),
+    )
+    .min(1)
+    .max(18),
+});
+
+type PlannedBeat = z.infer<typeof PlanSchema>['beats'][number];
 
 const CriticSchema = z.object({
   pass: z.boolean(),
@@ -103,8 +131,12 @@ const MAX_PAGE_CHARS = 6_000;
 
 export interface TeachOptions {
   depth?: 'core' | 'bridge';
+  /** False turns off generated animations; the lesson itself is unchanged. */
+  animate?: boolean;
   /** Reported per build stage so the UI can show real progress. */
   onProgress?: (percent: number, message: string) => void;
+  /** Fires as each slide is saved, so the learner can start reading early. */
+  onSlide?: (document: LessonDocument, lessonId: string) => void;
 }
 
 interface LessonInput {
@@ -153,11 +185,54 @@ function pagesText(input: LessonInput): string {
     .slice(0, MAX_PAGE_CHARS);
 }
 
-/** Deterministic skeleton. A bridge recap keeps the explanation beats only. */
+/** Deterministic skeleton, used only when the planner call fails. */
 export function beatSkeleton(depth: 'core' | 'bridge'): LessonBeatKind[] {
   return depth === 'bridge'
     ? ['hook', 'intuition', 'worked', 'recall']
     : SKELETON;
+}
+
+/**
+ * The model chooses the deck's length and shape from the topic's real scope:
+ * one slide for a definition, a dozen for a derivation with several worked
+ * problems. No fixed count, and no slides repeating the same idea.
+ */
+async function planBeats(
+  ctx: RunContext,
+  input: LessonInput,
+  objective: string,
+  depth: 'core' | 'bridge',
+): Promise<PlannedBeat[]> {
+  const fallback = (): PlannedBeat[] =>
+    beatSkeleton(depth).map((kind) => ({ kind, focus: BEAT_BRIEF[kind] }));
+  try {
+    const plan = await boundedModelTask(
+      ctx,
+      LESSON_PLAN,
+      [
+        `<topic>${input.topicTitle}</topic>`,
+        `<objective>${objective}</objective>`,
+        `<depth>${
+          depth === 'bridge'
+            ? 'quick recap, at most 4 slides, only what is needed to remember the idea'
+            : 'full lesson'
+        }</depth>`,
+        input.relatedQuestions.length === 0
+          ? ''
+          : `<exam_questions>\n${input.relatedQuestions.join('\n---\n')}\n</exam_questions>`,
+        `<material>\n${pagesText(input)}\n</material>`,
+      ]
+        .filter((part) => part !== '')
+        .join('\n'),
+      PlanSchema,
+      // Up to 18 planned slides with a sentence each must not truncate.
+      { temperature: 0.2, maxTokens: 2_000 },
+    );
+    const beats = depth === 'bridge' ? plan.beats.slice(0, 4) : plan.beats;
+    return beats.length === 0 ? fallback() : beats;
+  } catch {
+    return fallback();
+  }
 }
 
 async function writeBeat(
@@ -166,11 +241,13 @@ async function writeBeat(
   objective: string,
   kind: LessonBeatKind,
   extra: string,
-): Promise<LessonBeat> {
+  focus = '',
+): Promise<{ beat: LessonBeat; animationBrief: string | null }> {
   const userContent = [
     `<topic>${input.topicTitle}</topic>`,
     `<objective>${objective}</objective>`,
     `<beat kind="${kind}">${BEAT_BRIEF[kind]}</beat>`,
+    focus === '' ? '' : `<focus>${focus}</focus>`,
     input.relatedQuestions.length === 0
       ? ''
       : `<exam_questions>\n${input.relatedQuestions.join('\n---\n')}\n</exam_questions>`,
@@ -182,9 +259,16 @@ async function writeBeat(
 
   const draft = await boundedModelTask(ctx, TEACH_BEAT, userContent, BeatSchema, {
     temperature: 0.3,
-    maxTokens: 900,
+    maxTokens: 1_400,
   });
-  return toBeat(draft, kind);
+  return { beat: toBeat(draft, kind), animationBrief: animationBriefOf(draft) };
+}
+
+function animationBriefOf(draft: BeatDraft): string | null {
+  const animation = draft.animation;
+  if (animation === null || animation === undefined || !animation.needed) return null;
+  const brief = animation.brief.trim();
+  return brief === '' ? null : brief;
 }
 
 function toBeat(draft: BeatDraft, kind: LessonBeatKind): LessonBeat {
@@ -200,16 +284,20 @@ function toBeat(draft: BeatDraft, kind: LessonBeatKind): LessonBeat {
 }
 
 function fallbackBeat(input: LessonInput, kind: LessonBeatKind, objective: string): LessonBeat {
-  const excerpt = input.pages
-    .map((page) => `Page ${page.pageNumber}: ${page.text.slice(0, 600)}`)
-    .join('\n');
   return {
     title: `What your notes say about ${input.topicTitle}`,
     kind,
     intro:
       'The teaching model could not produce a reliable explanation for this beat, so here is the source text instead.',
     blocks: [
-      { type: 'text', text: excerpt === '' ? 'No readable note pages were found.' : excerpt },
+      // Fenced code, not parsed Markdown: an unbalanced $ or half a LaTeX
+      // environment in OCR text would otherwise swallow the next page header
+      // into a broken formula and paint the rest of the excerpt red.
+      ...input.pages.slice(0, 2).map((page) => ({
+        type: 'code' as const,
+        language: 'text',
+        code: `Page ${page.pageNumber}\n${page.text.slice(0, 1_200)}`,
+      })),
       {
         type: 'callout',
         tone: 'note',
@@ -221,6 +309,52 @@ function fallbackBeat(input: LessonInput, kind: LessonBeatKind, objective: strin
     check: null,
     citationPages: input.pages.map((page) => page.pageNumber),
   };
+}
+
+const AnimationSchema = z.object({
+  title: z.string().min(2).max(80),
+  html: z.string().min(200).max(24_000),
+});
+
+/** Two animations per core lesson is enough; a recap gets one at most. */
+const MAX_ANIMATIONS = 2;
+/** A failed animation must not occupy the whole lesson build. */
+const MAX_ANIMATION_ATTEMPTS = 3;
+
+/**
+ * The frame is sandboxed without same-origin, but a generated page that tries
+ * to load the outside world is still not what a lesson should contain.
+ */
+const UNSAFE_ANIMATION =
+  /https?:\/\/|<\s*(?:link|iframe|object|embed|video|audio|source)\b|<\s*script[^>]+src\s*=|@import\b|\bfetch\s*\(|XMLHttpRequest|localStorage|sessionStorage|window\.open|document\.cookie/i;
+
+/**
+ * One extra model call, after a beat has asked for a visual. Best effort: a
+ * failure leaves the beat exactly as it was, never a half-written lesson.
+ */
+async function writeAnimation(
+  ctx: RunContext,
+  input: LessonInput,
+  beat: LessonBeat,
+  brief: string,
+): Promise<LessonAnimation | null> {
+  try {
+    const draft = await boundedModelTask(
+      ctx,
+      ANIMATION_SCRIPT,
+      [
+        `<topic>${input.topicTitle}</topic>`,
+        `<beat>${beat.title}\n${beat.intro}</beat>`,
+        `<brief>${brief}</brief>`,
+      ].join('\n'),
+      AnimationSchema,
+      { temperature: 0.2, maxTokens: 3_000 },
+    );
+    if (UNSAFE_ANIMATION.test(draft.html)) return null;
+    return { title: draft.title.trim(), html: draft.html, brief };
+  } catch {
+    return null;
+  }
 }
 
 async function reviewBeat(
@@ -339,16 +473,71 @@ export async function buildTeachingLesson(
     // The skeleton and the notes are enough to continue.
   }
 
+  report(14, 'Planning the slides');
+  const plan = await planBeats(ctx, input, objective, depth);
+  const animate = options.animate !== false;
+  const onSlide = options.onSlide ?? (() => {});
+  let animationBudget = depth === 'bridge' ? 1 : MAX_ANIMATIONS;
+  let animationAttempts = 0;
+
+  const makeDocument = (beats: LessonBeat[]): LessonDocument => ({
+    version: 2,
+    title: input.topicTitle,
+    objective: why === '' ? objective : `${objective} ${why}`,
+    beats,
+    plannedBeats: plan.length,
+    checkQuestions: beats
+      .map((beat) => beat.check)
+      .filter((check): check is { prompt: string; answer: string } => check !== null)
+      .slice(0, 3),
+    citations: [...new Set(beats.flatMap((beat) => beat.citationPages))].sort((a, b) => a - b),
+    isGeneralContent: false,
+  });
+
+  // The lesson record is created with its first finished slide, so every
+  // further slide saves straight into it and is readable immediately. The old
+  // lesson stays active until then, and a cancelled build loses nothing.
+  let lessonId: string | null = null;
+  const persist = async (document: LessonDocument) => {
+    if (lessonId === null) {
+      const created = await saveActiveLesson(ctx.db.driver, {
+        scope: 'course',
+        courseId: ctx.course.id,
+        topicId,
+        language: 'mixed',
+        depth,
+        contentMd: documentToMarkdown(document),
+        citations: document.citations.map((page) => ({ page })),
+        isGeneralContent: false,
+      });
+      lessonId = created.id;
+    } else {
+      await ctx.db.driver.execute(
+        'UPDATE lessons SET content_md = $1, citations = $2 WHERE id = $3',
+        [
+          documentToMarkdown(document),
+          JSON.stringify(document.citations.map((page) => ({ page }))),
+          lessonId,
+        ],
+      );
+    }
+    await saveLessonDocument(ctx.db.driver, lessonId, document, TEACH_BEAT.version);
+    onSlide(document, lessonId);
+  };
+
   const beats: LessonBeat[] = [];
-  const skeleton = beatSkeleton(depth);
-  for (const [beatIndex, kind] of skeleton.entries()) {
+  for (const [beatIndex, planned] of plan.entries()) {
+    const kind = planned.kind;
     report(
-      18 + Math.round((beatIndex / Math.max(1, skeleton.length)) * 72),
-      `Writing beat ${beatIndex + 1} of ${skeleton.length}`,
+      18 + Math.round((beatIndex / Math.max(1, plan.length)) * 70),
+      `Writing slide ${beatIndex + 1} of ${plan.length}`,
     );
     let beat: LessonBeat;
+    let animationBrief: string | null = null;
     try {
-      beat = await writeBeat(ctx, input, objective, kind, '');
+      const written = await writeBeat(ctx, input, objective, kind, '', planned.focus);
+      beat = written.beat;
+      animationBrief = written.animationBrief;
       if (kind === 'worked' || kind === 'intuition' || kind === 'exam_shape') {
         beat = await reviewBeat(ctx, input, beat);
       }
@@ -367,36 +556,83 @@ export async function buildTeachingLesson(
       };
     }
     beats.push(beat);
+    // Show this slide now; the rest keep writing while it is read.
+    await persist(makeDocument(beats));
+
+    // The beat model decides whether the idea needs motion, not the app: most
+    // beats do not, so a lesson is not padded with animations nobody asked for.
+    if (
+      animate &&
+      animationBrief !== null &&
+      animationBudget > 0 &&
+      animationAttempts < MAX_ANIMATION_ATTEMPTS
+    ) {
+      animationAttempts += 1;
+      report(
+        18 + Math.round((beatIndex / Math.max(1, plan.length)) * 70),
+        `Animating the idea for slide ${beatIndex + 1}`,
+      );
+      const animation = await writeAnimation(ctx, input, beat, animationBrief);
+      if (animation !== null) {
+        beat = { ...beat, animation };
+        beats[beats.length - 1] = beat;
+        animationBudget -= 1;
+        await persist(makeDocument(beats));
+      }
+    }
   }
 
-  const checks = beats
-    .map((beat) => beat.check)
-    .filter((check): check is { prompt: string; answer: string } => check !== null)
-    .slice(0, 3);
   report(94, 'Saving the lesson');
-  const citations = [...new Set(beats.flatMap((beat) => beat.citationPages))].sort((a, b) => a - b);
-  const document: LessonDocument = {
-    version: 2,
-    title: input.topicTitle,
-    objective: why === '' ? objective : `${objective} ${why}`,
-    beats,
-    checkQuestions: checks,
-    citations,
-    isGeneralContent: false,
-  };
+  const document = makeDocument(beats);
+  await persist(document);
+  if (lessonId === null) throw new Error('The lesson could not be saved.');
+  return { lessonId, document };
+}
 
-  const lesson = await saveActiveLesson(ctx.db.driver, {
-    scope: 'course',
-    courseId: ctx.course.id,
-    topicId,
-    language: 'mixed',
-    depth,
-    contentMd: documentToMarkdown(document),
-    citations: citations.map((page) => ({ page })),
-    isGeneralContent: false,
-  });
-  await saveLessonDocument(ctx.db.driver, lesson.id, document, TEACH_BEAT.version);
-  return { lessonId: lesson.id, document };
+/**
+ * Adds a generated animation to an existing slide on request. Automatic
+ * builds only animate beats that asked for motion; this is the manual path
+ * for a slide the learner wants to see move after the fact.
+ */
+export async function addTeachingAnimation(
+  ctx: RunContext,
+  lessonId: string,
+  topicId: string,
+  beatIndex: number,
+): Promise<LessonDocument> {
+  const existing = await getLessonDocument(ctx.db.driver, lessonId);
+  if (existing === null) throw new Error('This lesson has no teaching board to animate.');
+  const current = existing.beats[beatIndex];
+  if (current === undefined) throw new Error('That slide no longer exists.');
+  if (current.animation !== undefined && current.animation !== null) return existing;
+  // Only the topic title is used by the animation prompt: skip page retrieval.
+  const topicRows = await ctx.db.driver.select<{ title: string }>(
+    'SELECT title FROM topics WHERE id = $1',
+    [topicId],
+  );
+  const input: LessonInput = {
+    topicTitle: topicRows[0]?.title ?? topicId,
+    pages: [],
+    relatedQuestions: [],
+  };
+  const brief = `Animate the central mechanism of this slide so it can be watched: ${current.title}. ${current.intro}`.slice(
+    0,
+    400,
+  );
+  const animation = await writeAnimation(ctx, input, current, brief);
+  if (animation === null) {
+    throw new Error('The animation could not be generated. Try again, or pick a slide with a clear process.');
+  }
+  const beats = existing.beats.map((beat, index) =>
+    index === beatIndex ? { ...beat, animation } : beat,
+  );
+  const next: LessonDocument = { ...existing, beats };
+  await saveLessonDocument(ctx.db.driver, lessonId, next, TEACH_BEAT.version);
+  await ctx.db.driver.execute('UPDATE lessons SET content_md = $1 WHERE id = $2', [
+    documentToMarkdown(next),
+    lessonId,
+  ]);
+  return next;
 }
 
 /** Rebuilds one beat and saves the updated document (per-beat repair). */
@@ -412,17 +648,27 @@ export async function rebuildTeachingBeat(
   if (current === undefined) throw new Error('That beat no longer exists.');
   const input = await lessonInput(ctx, topicId, 'core');
   let beat: LessonBeat;
+  let animationBrief: string | null = null;
   try {
-    beat = await writeBeat(
+    const written = await writeBeat(
       ctx,
       input,
       existing.objective,
       current.kind,
       'The learner asked for a clearer explanation of this beat.',
     );
+    beat = written.beat;
+    animationBrief = written.animationBrief;
     beat = await reviewBeat(ctx, input, beat);
   } catch {
     beat = fallbackBeat(input, current.kind, existing.objective);
+  }
+  // Keep the beat's visual when it had one: regenerating the explanation must
+  // not silently remove the animation the learner was watching.
+  const brief = animationBrief ?? current.animation?.brief ?? null;
+  if (current.animation !== undefined && current.animation !== null && brief !== null) {
+    const animation = await writeAnimation(ctx, input, beat, brief);
+    if (animation !== null) beat = { ...beat, animation };
   }
   const beats = existing.beats.map((item, index) => (index === beatIndex ? beat : item));
   const next: LessonDocument = {
