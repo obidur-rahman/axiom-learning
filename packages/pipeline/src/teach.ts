@@ -57,7 +57,13 @@ const BeatSchema = z.object({
   blocks: z.array(BlockSchema).min(1).max(8),
   takeaway: z.string().nullable().optional(),
   check: z.object({ prompt: z.string().min(1), answer: z.string().min(1) }).nullable().optional(),
-  citationPages: z.array(z.number().int().min(1)).max(20).default([]),
+  citationPages: z
+    .array(z.number().int().min(1))
+    .max(20)
+    .default([])
+    // The model cites the same page twice often enough that it must not reach
+    // React as duplicate keys; keep the first mention.
+    .transform((pages) => [...new Set(pages)]),
 });
 
 const ObjectiveSchema = z.object({

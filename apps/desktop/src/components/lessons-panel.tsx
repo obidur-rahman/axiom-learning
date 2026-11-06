@@ -137,9 +137,10 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
   const activeTopic = topics.find((topic) => topic.id === topicId);
   const citationPages = useMemo(() => {
     if (lesson?.citations === null || lesson?.citations === undefined) return [];
-    return (lesson.citations as { page?: number }[])
+    const pages = (lesson.citations as { page?: number }[])
       .map((citation) => citation.page)
       .filter((page): page is number => typeof page === 'number');
+    return [...new Set(pages)];
   }, [lesson]);
 
   const setAnswer = useCallback((index: number, value: string) => {

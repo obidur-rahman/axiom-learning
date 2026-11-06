@@ -21,6 +21,11 @@ import { useSpeech } from '../lib/speech';
 import { Markdown } from './markdown';
 import { SectionAsk } from './section-ask';
 
+/** Citation hints repeat when the model cites the same page twice; render once. */
+function uniquePages(pages: readonly number[]): number[] {
+  return [...new Set(pages)];
+}
+
 /** Flat text of one beat, for narration and for the section-scoped ask box. */
 function beatText(beat: { title: string; intro: string; blocks: LessonBlock[]; takeaway: string | null }): string {
   const parts = [beat.title, beat.intro];
@@ -339,7 +344,7 @@ export function LessonBoard({
           <div>
             <p className="text-[10px] uppercase tracking-[0.12em] text-text-muted">Pages</p>
             <p className="mt-1 flex flex-wrap gap-1">
-              {document.citations.map((page) => (
+              {uniquePages(document.citations).map((page) => (
                 <span key={page} className="chip num">
                   p.{page}
                 </span>
@@ -355,7 +360,7 @@ export function LessonBoard({
           <span className="chip num">
             {index + 1}/{document.beats.length}
           </span>
-          {beat.citationPages.map((page) => (
+          {uniquePages(beat.citationPages).map((page) => (
             <span key={page} className="chip num">
               p.{page}
             </span>
@@ -448,7 +453,7 @@ export function LessonBoard({
         <article className="mx-auto flex min-h-full w-full max-w-[1080px] flex-col justify-center px-6 py-10 sm:px-10 lg:px-16">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="chip">{beat.kind.replace('_', ' ')}</span>
-            {beat.citationPages.map((page) => (
+            {uniquePages(beat.citationPages).map((page) => (
               <span key={page} className="chip num">
                 p.{page}
               </span>
