@@ -208,18 +208,6 @@ export type LessonBlock =
   | { type: 'flow'; nodes: { id: string; label: string }[]; edges: { from: string; to: string; label?: string }[] }
   | { type: 'recall'; prompt: string; answer: string };
 
-/**
- * A generated, self-contained animation that supplements one beat. The html is
- * sandboxed when it runs: it cannot reach this window, the database or the
- * network through the parent.
- */
-export interface LessonAnimation {
-  title: string;
-  html: string;
-  /** Why this beat asked for a visual, kept so a rebuild can reuse it. */
-  brief: string;
-}
-
 export interface LessonBeat {
   title: string;
   kind: LessonBeatKind;
@@ -228,8 +216,6 @@ export interface LessonBeat {
   takeaway: string | null;
   check: { prompt: string; answer: string } | null;
   citationPages: number[];
-  /** Only present when a visual explains the idea better than prose does. */
-  animation?: LessonAnimation | null;
 }
 
 export interface LessonDocument {

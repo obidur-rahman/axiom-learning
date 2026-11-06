@@ -4,7 +4,6 @@
  * (local-first). Polls every 5 s while idle; one job runs at a time.
  */
 import {
-  addTeachingAnimation,
   buildLessonStep,
   buildRoadmapStep,
   buildTeachingLesson,
@@ -28,7 +27,6 @@ import {
 } from '@axiom/data';
 import { getDb } from './db';
 import { loadConfig } from './provider';
-import { loadPrefs } from './prefs';
 import { installModelManager, releaseModelsAfterJob } from './model-manager';
 import { installProviderFetch } from './provider-http';
 import { readMaterial } from './read-material';
@@ -151,8 +149,6 @@ async function runJob(
         (job.payload as {
           topicId?: unknown;
           depth?: unknown;
-          lessonId?: unknown;
-          animateBeat?: unknown;
         } | null) ?? {};
       const topicId = String(payload.topicId ?? '');
       if (topicId === '') throw new Error('build_lesson requires a topicId in the payload');
@@ -162,23 +158,11 @@ async function runJob(
       const ctx: RunContext = { db, course, config: loadConfig, signal };
       let readyLessonId: string | null = null;
 
-      if (typeof payload.animateBeat === 'number') {
-        // One slide's animation, requested from the board. No lesson rebuild.
-        const targetLessonId = String(payload.lessonId ?? '');
-        if (targetLessonId === '') {
-          throw new Error('An animation request needs a lessonId in the payload');
-        }
-        report(20, 'Designing the animation for this slide');
-        await addTeachingAnimation(ctx, targetLessonId, topicId, payload.animateBeat);
-        report(90, 'Saving the animation');
-        readyLessonId = targetLessonId;
-      } else {
-        let lessonId: string | null = null;
-        let partialId: string | null = null;
-        try {
+      let lessonId: string | null = null;
+      let partialId: string | null = null;
+      try {
         const result = await buildTeachingLesson(ctx, topicId, {
           depth,
-          animate: loadPrefs().lessonAnimations,
           onProgress: report,
           onSlide: (document, id) => {
             partialId = id;
@@ -211,8 +195,7 @@ async function runJob(
           }
         }
       }
-        readyLessonId = lessonId;
-      }
+      readyLessonId = lessonId;
       await complete(driver, job.id);
       emitAppEvent({
         kind: 'lesson-ready',

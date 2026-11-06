@@ -120,25 +120,6 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
     }
   }, [courseId, topicId, depth, busy]);
 
-  /** One slide's animation, without rebuilding the rest of the lesson. */
-  const animateBeat = useCallback(
-    async (beatIndex: number) => {
-      if (lesson === null || topicId === '' || busy) return;
-      setBusy(true);
-      setMessage('Generating an animation for this slide...');
-      try {
-        const db = await getDb();
-        await enqueue(db.driver, 'build_lesson', {
-          courseId,
-          payload: { topicId, depth, lessonId: lesson.id, animateBeat: beatIndex },
-        });
-      } finally {
-        setBusy(false);
-      }
-    },
-    [courseId, topicId, depth, lesson, busy],
-  );
-
   const flag = useCallback(async () => {
     if (lesson === null) return;
     const db = await getDb();
@@ -318,7 +299,6 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
               courseId={courseId}
               document={document}
               onRegenerate={() => void generate()}
-              onAnimate={(beatIndex) => void animateBeat(beatIndex)}
               busy={busy}
             />
           ) : view === 'slides' ? (
@@ -332,7 +312,6 @@ export function LessonsPanel({ courseId }: { courseId: string }) {
               onAnswer={setAnswer}
               shown={shown}
               onShowAnswer={showAnswer}
-              animations={document?.beats.map((beat) => beat.animation ?? null)}
             />
           ) : (
             <article className="rounded-[var(--radius-card)] border border-border bg-panel p-5 sm:p-6">

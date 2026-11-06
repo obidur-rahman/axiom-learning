@@ -3,7 +3,6 @@ import {
   getLessonDocument,
   saveActiveLesson,
   saveLessonDocument,
-  type LessonAnimation,
   type LessonBeat,
   type LessonBeatKind,
   type LessonBlock,
@@ -11,7 +10,7 @@ import {
 } from '@axiom/data';
 import { retrievePagesSmart } from './embeddings';
 import { retrievePages } from './tutor';
-import { ANIMATION_SCRIPT, LESSON_OBJECTIVE, LESSON_PLAN, TEACH_BEAT, TEACH_CRITIC } from './prompts';
+import { LESSON_OBJECTIVE, LESSON_PLAN, TEACH_BEAT, TEACH_CRITIC } from './prompts';
 import { boundedModelTask, type RunContext } from './steps';
 
 /**
@@ -58,11 +57,6 @@ const BeatSchema = z.object({
   blocks: z.array(BlockSchema).min(1).max(8),
   takeaway: z.string().nullable().optional(),
   check: z.object({ prompt: z.string().min(1), answer: z.string().min(1) }).nullable().optional(),
-  /** Ask for a visual only when the beat genuinely needs one. */
-  animation: z
-    .object({ needed: z.boolean(), brief: z.string().max(400).default('') })
-    .nullable()
-    .optional(),
   citationPages: z.array(z.number().int().min(1)).max(20).default([]),
 });
 
@@ -131,8 +125,6 @@ const MAX_PAGE_CHARS = 6_000;
 
 export interface TeachOptions {
   depth?: 'core' | 'bridge';
-  /** False turns off generated animations; the lesson itself is unchanged. */
-  animate?: boolean;
   /** Reported per build stage so the UI can show real progress. */
   onProgress?: (percent: number, message: string) => void;
   /** Fires as each slide is saved, so the learner can start reading early. */
@@ -242,7 +234,7 @@ async function writeBeat(
   kind: LessonBeatKind,
   extra: string,
   focus = '',
-): Promise<{ beat: LessonBeat; animationBrief: string | null }> {
+): Promise<LessonBeat> {
   const userContent = [
     `<topic>${input.topicTitle}</topic>`,
     `<objective>${objective}</objective>`,
@@ -261,14 +253,7 @@ async function writeBeat(
     temperature: 0.3,
     maxTokens: 1_400,
   });
-  return { beat: toBeat(draft, kind), animationBrief: animationBriefOf(draft) };
-}
-
-function animationBriefOf(draft: BeatDraft): string | null {
-  const animation = draft.animation;
-  if (animation === null || animation === undefined || !animation.needed) return null;
-  const brief = animation.brief.trim();
-  return brief === '' ? null : brief;
+  return toBeat(draft, kind);
 }
 
 function toBeat(draft: BeatDraft, kind: LessonBeatKind): LessonBeat {
@@ -309,52 +294,6 @@ function fallbackBeat(input: LessonInput, kind: LessonBeatKind, objective: strin
     check: null,
     citationPages: input.pages.map((page) => page.pageNumber),
   };
-}
-
-const AnimationSchema = z.object({
-  title: z.string().min(2).max(80),
-  html: z.string().min(200).max(24_000),
-});
-
-/** Two animations per core lesson is enough; a recap gets one at most. */
-const MAX_ANIMATIONS = 2;
-/** A failed animation must not occupy the whole lesson build. */
-const MAX_ANIMATION_ATTEMPTS = 3;
-
-/**
- * The frame is sandboxed without same-origin, but a generated page that tries
- * to load the outside world is still not what a lesson should contain.
- */
-const UNSAFE_ANIMATION =
-  /https?:\/\/|<\s*(?:link|iframe|object|embed|video|audio|source)\b|<\s*script[^>]+src\s*=|@import\b|\bfetch\s*\(|XMLHttpRequest|localStorage|sessionStorage|window\.open|document\.cookie/i;
-
-/**
- * One extra model call, after a beat has asked for a visual. Best effort: a
- * failure leaves the beat exactly as it was, never a half-written lesson.
- */
-async function writeAnimation(
-  ctx: RunContext,
-  input: LessonInput,
-  beat: LessonBeat,
-  brief: string,
-): Promise<LessonAnimation | null> {
-  try {
-    const draft = await boundedModelTask(
-      ctx,
-      ANIMATION_SCRIPT,
-      [
-        `<topic>${input.topicTitle}</topic>`,
-        `<beat>${beat.title}\n${beat.intro}</beat>`,
-        `<brief>${brief}</brief>`,
-      ].join('\n'),
-      AnimationSchema,
-      { temperature: 0.2, maxTokens: 3_000 },
-    );
-    if (UNSAFE_ANIMATION.test(draft.html)) return null;
-    return { title: draft.title.trim(), html: draft.html, brief };
-  } catch {
-    return null;
-  }
 }
 
 async function reviewBeat(
@@ -475,10 +414,7 @@ export async function buildTeachingLesson(
 
   report(14, 'Planning the slides');
   const plan = await planBeats(ctx, input, objective, depth);
-  const animate = options.animate !== false;
   const onSlide = options.onSlide ?? (() => {});
-  let animationBudget = depth === 'bridge' ? 1 : MAX_ANIMATIONS;
-  let animationAttempts = 0;
 
   const makeDocument = (beats: LessonBeat[]): LessonDocument => ({
     version: 2,
@@ -533,11 +469,8 @@ export async function buildTeachingLesson(
       `Writing slide ${beatIndex + 1} of ${plan.length}`,
     );
     let beat: LessonBeat;
-    let animationBrief: string | null = null;
     try {
-      const written = await writeBeat(ctx, input, objective, kind, '', planned.focus);
-      beat = written.beat;
-      animationBrief = written.animationBrief;
+      beat = await writeBeat(ctx, input, objective, kind, '', planned.focus);
       if (kind === 'worked' || kind === 'intuition' || kind === 'exam_shape') {
         beat = await reviewBeat(ctx, input, beat);
       }
@@ -558,28 +491,6 @@ export async function buildTeachingLesson(
     beats.push(beat);
     // Show this slide now; the rest keep writing while it is read.
     await persist(makeDocument(beats));
-
-    // The beat model decides whether the idea needs motion, not the app: most
-    // beats do not, so a lesson is not padded with animations nobody asked for.
-    if (
-      animate &&
-      animationBrief !== null &&
-      animationBudget > 0 &&
-      animationAttempts < MAX_ANIMATION_ATTEMPTS
-    ) {
-      animationAttempts += 1;
-      report(
-        18 + Math.round((beatIndex / Math.max(1, plan.length)) * 70),
-        `Animating the idea for slide ${beatIndex + 1}`,
-      );
-      const animation = await writeAnimation(ctx, input, beat, animationBrief);
-      if (animation !== null) {
-        beat = { ...beat, animation };
-        beats[beats.length - 1] = beat;
-        animationBudget -= 1;
-        await persist(makeDocument(beats));
-      }
-    }
   }
 
   report(94, 'Saving the lesson');
@@ -587,52 +498,6 @@ export async function buildTeachingLesson(
   await persist(document);
   if (lessonId === null) throw new Error('The lesson could not be saved.');
   return { lessonId, document };
-}
-
-/**
- * Adds a generated animation to an existing slide on request. Automatic
- * builds only animate beats that asked for motion; this is the manual path
- * for a slide the learner wants to see move after the fact.
- */
-export async function addTeachingAnimation(
-  ctx: RunContext,
-  lessonId: string,
-  topicId: string,
-  beatIndex: number,
-): Promise<LessonDocument> {
-  const existing = await getLessonDocument(ctx.db.driver, lessonId);
-  if (existing === null) throw new Error('This lesson has no teaching board to animate.');
-  const current = existing.beats[beatIndex];
-  if (current === undefined) throw new Error('That slide no longer exists.');
-  if (current.animation !== undefined && current.animation !== null) return existing;
-  // Only the topic title is used by the animation prompt: skip page retrieval.
-  const topicRows = await ctx.db.driver.select<{ title: string }>(
-    'SELECT title FROM topics WHERE id = $1',
-    [topicId],
-  );
-  const input: LessonInput = {
-    topicTitle: topicRows[0]?.title ?? topicId,
-    pages: [],
-    relatedQuestions: [],
-  };
-  const brief = `Animate the central mechanism of this slide so it can be watched: ${current.title}. ${current.intro}`.slice(
-    0,
-    400,
-  );
-  const animation = await writeAnimation(ctx, input, current, brief);
-  if (animation === null) {
-    throw new Error('The animation could not be generated. Try again, or pick a slide with a clear process.');
-  }
-  const beats = existing.beats.map((beat, index) =>
-    index === beatIndex ? { ...beat, animation } : beat,
-  );
-  const next: LessonDocument = { ...existing, beats };
-  await saveLessonDocument(ctx.db.driver, lessonId, next, TEACH_BEAT.version);
-  await ctx.db.driver.execute('UPDATE lessons SET content_md = $1 WHERE id = $2', [
-    documentToMarkdown(next),
-    lessonId,
-  ]);
-  return next;
 }
 
 /** Rebuilds one beat and saves the updated document (per-beat repair). */
@@ -648,27 +513,17 @@ export async function rebuildTeachingBeat(
   if (current === undefined) throw new Error('That beat no longer exists.');
   const input = await lessonInput(ctx, topicId, 'core');
   let beat: LessonBeat;
-  let animationBrief: string | null = null;
   try {
-    const written = await writeBeat(
+    beat = await writeBeat(
       ctx,
       input,
       existing.objective,
       current.kind,
       'The learner asked for a clearer explanation of this beat.',
     );
-    beat = written.beat;
-    animationBrief = written.animationBrief;
     beat = await reviewBeat(ctx, input, beat);
   } catch {
     beat = fallbackBeat(input, current.kind, existing.objective);
-  }
-  // Keep the beat's visual when it had one: regenerating the explanation must
-  // not silently remove the animation the learner was watching.
-  const brief = animationBrief ?? current.animation?.brief ?? null;
-  if (current.animation !== undefined && current.animation !== null && brief !== null) {
-    const animation = await writeAnimation(ctx, input, beat, brief);
-    if (animation !== null) beat = { ...beat, animation };
   }
   const beats = existing.beats.map((item, index) => (index === beatIndex ? beat : item));
   const next: LessonDocument = {

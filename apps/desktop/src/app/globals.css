@@ -1710,43 +1710,6 @@ select optgroup {
   font-size: 13.5px;
 }
 
-/* ---------- Lesson animation ---------- */
-/* Generated pages come from the model, so they run in a sandboxed iframe. */
-.lesson-animation {
-  margin: 0;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  background: #14141f;
-}
-.lesson-animation-frame {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border: 0;
-  background: #14141f;
-}
-.lesson-animation-caption {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 5px 9px;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-surface);
-}
-.lesson-animation-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-.lesson-animation-lg .lesson-animation-title { font-size: 12px; }
-
 /* ---------- PDF export sheet ---------- */
 /* Captured off screen by html2canvas; A4 width at 96 dpi, paper margins. */
 .pdf-sheet {

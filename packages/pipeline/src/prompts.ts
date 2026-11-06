@@ -162,7 +162,6 @@ export const TEACH_BEAT: PromptSpec = {
 You write ONE beat of a teaching lesson. Reply with JSON only:
 {"title":"claim, not a label","intro":"1-2 sentences",
 "blocks":[{"type":"text","text":"..."}],"takeaway":"one sentence",
-"animation":{"needed":false,"brief":""},
 "check":{"prompt":"...","answer":"..."},"citationPages":[4]}
 Allowed blocks:
 {"type":"text","text":"..."}
@@ -186,37 +185,7 @@ Rules that matter:
   outside the visual.
 - Cite the page number that supports each fact. Never invent a page.
 - If the pages do not support the beat, say so plainly in intro and return an
-  empty check. Do not fill space with general knowledge.
-- Set animation.needed true only when motion or spatial change carries the
-  idea: a process over time, a geometric relation, a wave or field, a limit, a
-  force diagram. Leave it false for definitions, history, notation, exam tips,
-  and anything one sentence or one still diagram already explains. Never more
-  than one beat in a lesson asks for an animation.
-- When needed is true, brief is one sentence: what moves, what changes, and
-  what the learner should watch. When false, brief is "".`,
-};
-
-export const ANIMATION_SCRIPT: PromptSpec = {
-  version: 'animation-script@1',
-  system: `You write one short, self-contained animation that makes a single
-idea visible. Reply with JSON only:
-{"title":"2 to 6 words naming what is on screen","html":"<!doctype html>..."}
-Rules for html:
-- A complete HTML document with inline <style> and <script> only. No external
-  URLs, imports, fonts, images or network requests. No localStorage, alert,
-  prompt, window.open or top navigation.
-- Draw with inline SVG (preferred) or <canvas>. Animate with CSS keyframes or
-  requestAnimationFrame.
-- Use an 800x450 stage that scales to the frame. Set html and body margin 0,
-  background #14141f, text #e6e9ef, one accent #cba6f7.
-- One idea only, exactly the brief. Do not add a second idea or a caption
-  paragraph. The motion itself must teach: things move, build, or transform.
-- Loop seamlessly over 6 to 14 seconds and start automatically. No controls.
-- Labels are large (16px or more at 800x450), at most 8 words, high contrast,
-  and never cover the motion.
-- Write mathematics with Unicode (\u222b \u03a3 \u221a \u03c8 \u0127 \u2202 \u0394 \u03b8 \u2248 \u2264 \u2192 \u00b1) and
-  never with LaTeX commands: there is no maths renderer inside the frame.
-- Keep it under 200 lines and make sure it runs with no console errors.`,
+  empty check. Do not fill space with general knowledge.`,
 };
 
 export const TEACH_CRITIC: PromptSpec = {

@@ -12,12 +12,10 @@ import {
   Square,
   Volume2,
 } from 'lucide-react';
-import type { LessonAnimation } from '@axiom/data';
 import type { LessonCheckQuestion, LessonSlide, LessonSlideKind } from '../lib/lesson-content';
 import { setWindowFullscreen } from '../lib/fullscreen';
 import { usePrefs } from '../lib/prefs';
 import { toSpeechText, useSpeech } from '../lib/speech';
-import { LessonAnimation as LessonAnimationView } from './lesson-animation';
 import { Markdown } from './markdown';
 import { SectionAsk } from './section-ask';
 
@@ -38,8 +36,6 @@ interface LessonDeckProps {
   onAnswer: (index: number, value: string) => void;
   shown: number[];
   onShowAnswer: (index: number) => void;
-  /** Beat animations, indexed like slides; null where a beat has none. */
-  animations?: (LessonAnimation | null)[];
 }
 
 export function LessonDeck({
@@ -51,7 +47,6 @@ export function LessonDeck({
   onAnswer,
   shown,
   onShowAnswer,
-  animations,
 }: LessonDeckProps) {
   const prefs = usePrefs();
   const [index, setIndex] = useState(0);
@@ -62,7 +57,6 @@ export function LessonDeck({
   const total = slides.length + (questions.length > 0 ? 1 : 0);
   const isQuiz = index >= slides.length;
   const slide = isQuiz ? undefined : slides[index];
-  const animation = animations?.[index] ?? null;
 
   const narrationFor = useCallback(
     (at: number): string => {
@@ -373,11 +367,6 @@ export function LessonDeck({
                 <p className="slide-secondary">
                   <span className="font-semibold text-accent">Key idea</span> · {slide.takeaway}
                 </p>
-              )}
-              {animation !== null && (
-                <div className="mt-3">
-                  <LessonAnimationView animation={animation} />
-                </div>
               )}
               {!present && slide !== undefined && (
                 <div className="mt-3">

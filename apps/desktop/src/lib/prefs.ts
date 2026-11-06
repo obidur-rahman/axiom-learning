@@ -78,8 +78,6 @@ export interface Prefs {
   autoRebuildRoadmap: boolean;
   autoEmbedPages: boolean;
   flagLowConfidence: boolean;
-  /* Lessons */
-  lessonAnimations: boolean;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -109,7 +107,6 @@ export const DEFAULT_PREFS: Prefs = {
   autoRebuildRoadmap: true,
   autoEmbedPages: true,
   flagLowConfidence: true,
-  lessonAnimations: true,
 };
 
 let cache: Prefs | null = null;
@@ -182,7 +179,6 @@ function sanitize(raw: unknown): Prefs {
     autoRebuildRoadmap: bool(value.autoRebuildRoadmap, DEFAULT_PREFS.autoRebuildRoadmap),
     autoEmbedPages: bool(value.autoEmbedPages, DEFAULT_PREFS.autoEmbedPages),
     flagLowConfidence: bool(value.flagLowConfidence, DEFAULT_PREFS.flagLowConfidence),
-    lessonAnimations: bool(value.lessonAnimations, DEFAULT_PREFS.lessonAnimations),
   };
 }
 
