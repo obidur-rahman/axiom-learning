@@ -134,8 +134,10 @@ export function JobIndicator() {
         label={label}
       />
       {live !== null ? (
-        <span className="flex items-center justify-between gap-2 text-[10px] text-text-muted">
-          <span className="truncate">{live.message}</span>
+        <span className="flex items-start justify-between gap-2 text-[10px] text-text-muted">
+          <span className="min-w-0 break-words leading-tight" title={live.message}>
+            {live.message}
+          </span>
           <span className="num flex-none">{seconds}s</span>
         </span>
       ) : (

@@ -1,7 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { capabilitySummary, autoDetect, loadForm, probeAndStore, saveForm, type ProviderForm } from '../lib/provider';
+import { useCallback, useEffect, useState, type ClipboardEvent } from 'react';
+import { HOSTED_PROVIDERS, hostedProviderForKey, presetForBaseUrl } from '@axiom/ai';
+import {
+  capabilitySummary,
+  autoDetect,
+  fillHostedModels,
+  loadForm,
+  probeAndStore,
+  saveForm,
+  type ProviderForm,
+} from '../lib/provider';
 import { localModelInventory, type LocalModelInventory } from '../lib/model-manager';
 import { isDesktopRuntime } from '../lib/db';
 import { ModelLibrary } from './model-library';
@@ -32,6 +41,8 @@ export function SettingsForm() {
   const [probe, setProbe] = useState<Probe>({ loading: false, summary: null, error: null });
   const [detecting, setDetecting] = useState(false);
   const [inventory, setInventory] = useState<LocalModelInventory | null>(null);
+  const [hostedModels, setHostedModels] = useState<string[]>([]);
+  const [filling, setFilling] = useState(false);
 
   const refreshInventory = useCallback(async (baseUrl?: string) => {
     if (!isDesktopRuntime()) return;
@@ -60,6 +71,84 @@ export function SettingsForm() {
   const update = useCallback((patch: Partial<ProviderForm>) => {
     setForm((current) => (current === null ? current : { ...current, ...patch }));
   }, []);
+
+  /**
+   * Ask a hosted endpoint for its model list and fill one model per role.
+   * Shared by the provider picker, the key paste handler and the button.
+   */
+  const applyHostedFill = useCallback(
+    async (baseUrl: string, apiKey: string) => {
+      if (baseUrl.trim() === '') {
+        setSaved('Set the base URL first, or pick a provider above.');
+        return;
+      }
+      setFilling(true);
+      setSaved(null);
+      try {
+        const fill = await fillHostedModels(baseUrl, apiKey);
+        setHostedModels(fill.models);
+        update({
+          mode: 'hosted',
+          baseUrl: fill.baseUrl,
+          chatModel: fill.chatModel,
+          ocrModel: fill.ocrModel,
+          embedModel: fill.embedModel,
+        });
+        const roles = [
+          fill.chatModel === '' ? null : `chat ${fill.chatModel}`,
+          fill.ocrModel === '' ? null : `OCR ${fill.ocrModel}`,
+          fill.embedModel === '' ? null : `embed ${fill.embedModel}`,
+        ].filter((part): part is string => part !== null);
+        const count = `${fill.models.length} model${fill.models.length === 1 ? '' : 's'}`;
+        setSaved(
+          `Found ${count} at ${fill.provider}. ` +
+            (roles.length === 0 ? 'No usable names found; set them by hand.' : `Filled ${roles.join(' · ')}.`) +
+            (fill.embedModel === '' ? ' No embedding model - search will use keywords.' : ''),
+        );
+      } catch (error) {
+        setSaved(error instanceof Error ? error.message : String(error));
+      } finally {
+        setFilling(false);
+      }
+    },
+    [update],
+  );
+
+  const handleProviderChange = useCallback(
+    (id: string) => {
+      const preset = HOSTED_PROVIDERS.find((entry) => entry.id === id) ?? null;
+      if (preset === null) {
+        update({ mode: 'hosted' });
+        setSaved('Custom endpoint: paste the base URL and the model names.');
+        return;
+      }
+      update({ mode: 'hosted', baseUrl: preset.baseUrl });
+      setSaved(`${preset.label} selected.`);
+      const key = (form?.apiKey ?? '').trim();
+      if (key !== '') void applyHostedFill(preset.baseUrl, key);
+    },
+    [applyHostedFill, form, update],
+  );
+
+  /** A pasted key names its provider; fill the URL and models in one move. */
+  const handleKeyPaste = useCallback(
+    (event: ClipboardEvent<HTMLInputElement>) => {
+      const pasted = event.clipboardData.getData('text').trim();
+      const preset = hostedProviderForKey(pasted);
+      if (preset === null) return;
+      update({ mode: 'hosted', apiKey: pasted, baseUrl: preset.baseUrl });
+      void applyHostedFill(preset.baseUrl, pasted);
+    },
+    [applyHostedFill, update],
+  );
+
+  /** A typed key gets the base URL on blur, but only on a blank form. */
+  const handleKeyBlur = useCallback(() => {
+    if (form === null || form.baseUrl.trim() !== '') return;
+    const preset = hostedProviderForKey(form.apiKey ?? '');
+    if (preset === null) return;
+    update({ mode: 'hosted', baseUrl: preset.baseUrl });
+  }, [form, update]);
 
   const handleSave = useCallback(async () => {
     if (form === null) return;
@@ -120,6 +209,8 @@ export function SettingsForm() {
 
   const installed = inventory?.models.map((model) => model.name) ?? [];
   const loaded = inventory?.loaded.map((model) => model.name) ?? [];
+  // Once a hosted endpoint is queried, its IDs drive the model field hints.
+  const modelSuggestions = form.mode === 'hosted' ? hostedModels : installed;
 
   return (
     <div className="flex flex-col gap-5">
@@ -128,7 +219,7 @@ export function SettingsForm() {
         <div className="mt-2 grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Provider mode">
           {[
             { value: 'local' as const, label: 'Local model', hint: 'Ollama, LM Studio, vLLM on this machine' },
-            { value: 'hosted' as const, label: 'Hosted API', hint: 'OpenRouter, OpenAI, or any compatible endpoint' },
+            { value: 'hosted' as const, label: 'Hosted API', hint: 'Groq, OpenRouter, OpenAI, or any compatible endpoint' },
           ].map((option) => (
             <button
               key={option.value}
@@ -149,6 +240,25 @@ export function SettingsForm() {
         </div>
       </fieldset>
 
+      {form.mode === 'hosted' && (
+        <label className="field">
+          Provider
+          <select
+            value={presetForBaseUrl(form.baseUrl)?.id ?? 'custom'}
+            onChange={(event) => handleProviderChange(event.target.value)}
+            className="input"
+          >
+            {HOSTED_PROVIDERS.map((preset) => (
+              <option key={preset.id} value={preset.id}>{preset.label}</option>
+            ))}
+            <option value="custom">Custom / other</option>
+          </select>
+          <span className="text-[12px] text-text-muted">
+            Picking a provider fills its base URL. Pasting its key also fills the model names.
+          </span>
+        </label>
+      )}
+
       <label className="field">
         Base URL
         <input
@@ -163,7 +273,7 @@ export function SettingsForm() {
       </label>
 
       <datalist id="axiom-provider-models">
-        {installed.map((name) => <option key={name} value={name} />)}
+        {modelSuggestions.map((name) => <option key={name} value={name} />)}
       </datalist>
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -172,7 +282,7 @@ export function SettingsForm() {
           <input
             value={form.chatModel}
             onChange={(event) => update({ chatModel: event.target.value })}
-            placeholder="qwen2.5:7b"
+            placeholder={form.mode === 'local' ? 'qwen2.5:7b' : 'llama-3.3-70b-versatile'}
             list="axiom-provider-models"
             className="input"
           />
@@ -183,7 +293,7 @@ export function SettingsForm() {
           <input
             value={form.ocrModel}
             onChange={(event) => update({ ocrModel: event.target.value })}
-            placeholder="qwen2.5vl:3b"
+            placeholder={form.mode === 'local' ? 'qwen2.5vl:3b' : 'vision model id'}
             list="axiom-provider-models"
             className="input"
           />
@@ -194,7 +304,7 @@ export function SettingsForm() {
           <input
             value={form.embedModel}
             onChange={(event) => update({ embedModel: event.target.value })}
-            placeholder="nomic-embed-text"
+            placeholder={form.mode === 'local' ? 'nomic-embed-text' : 'text-embedding-3-small'}
             list="axiom-provider-models"
             className="input"
           />
@@ -208,7 +318,9 @@ export function SettingsForm() {
           type="password"
           value={form.apiKey ?? ''}
           onChange={(event) => update({ apiKey: event.target.value })}
-          placeholder={form.mode === 'local' ? 'Usually not needed for local models' : 'Paste the provider key'}
+          onPaste={handleKeyPaste}
+          onBlur={handleKeyBlur}
+          placeholder={form.mode === 'local' ? 'Usually not needed for local models' : 'Paste the provider key (fills the rest)'}
           className="input"
         />
         <span className="text-[12px] text-text-muted">
@@ -323,12 +435,23 @@ export function SettingsForm() {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => void handleSave()} className="btn btn-primary" disabled={probe.loading}>
+        <button type="button" onClick={() => void handleSave()} className="btn btn-primary" disabled={probe.loading || filling}>
           {probe.loading ? 'Probing...' : 'Save and probe'}
         </button>
-        <button type="button" onClick={() => void handleDetect()} disabled={detecting} className="btn btn-ghost">
-          {detecting ? 'Scanning ports...' : 'Try local ports'}
-        </button>
+        {form.mode === 'local' ? (
+          <button type="button" onClick={() => void handleDetect()} disabled={detecting} className="btn btn-ghost">
+            {detecting ? 'Scanning ports...' : 'Try local ports'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void applyHostedFill(form.baseUrl, form.apiKey ?? '')}
+            disabled={filling}
+            className="btn btn-ghost"
+          >
+            {filling ? 'Fetching models...' : 'Auto-fill models'}
+          </button>
+        )}
       </div>
 
       {saved !== null && <p className="text-sm text-text-muted" aria-live="polite">{saved}</p>}

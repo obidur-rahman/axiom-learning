@@ -73,7 +73,9 @@ export interface EmbedResult {
  */
 export function normalizeBaseUrl(baseUrl: string): string {
   let url = baseUrl.replace(/\/+$/, '');
-  if (!/\/v\d+(alpha|beta)?$/.test(url)) {
+  // Keep a versioned root (…/v1, …/v1beta) or a versioned OpenAI-compat root
+  // (Gemini exposes …/v1beta/openai); append /v1 only when neither is there.
+  if (!/\/v\d+(alpha|beta)?(\/openai)?$/.test(url)) {
     url = `${url}/v1`;
   }
   return url;

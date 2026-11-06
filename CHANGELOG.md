@@ -4,6 +4,17 @@ All notable changes to Axiom Learning are recorded here. The project follows a
 loose [Keep a Changelog](https://keepachangelog.com) shape and uses
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+- **Hosted provider auto-setup** — pick Groq, OpenRouter, OpenAI, Google
+  Gemini, Mistral, Cerebras or xAI and the base URL fills in; paste an API key
+  and the chat, OCR and embedding models are read from the endpoint's live
+  `/models` list. A custom OpenAI-compatible URL still gets name-based guesses.
+- **Model names in progress** — reading, OCR, embedding and content-generation
+  steps now name the model doing the work, in the activity rail and in the
+  in-page progress cards.
+
 ## [0.1.0] - 2026-11-06 — Alpha
 
 First usable build. Windows, local-first, no account.

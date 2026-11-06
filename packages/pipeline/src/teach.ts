@@ -389,12 +389,16 @@ export async function buildTeachingLesson(
 ): Promise<{ lessonId: string; document: LessonDocument }> {
   const depth = options.depth ?? 'core';
   const report = options.onProgress ?? (() => {});
+  // Name the model doing the writing: every message below that spends a model
+  // call carries it, so the progress strip says what is actually working.
+  const chatModel = (await ctx.config().catch(() => null))?.chatModel ?? '';
+  const withModel = chatModel === '' ? '' : ` with ${chatModel}`;
   report(5, 'Reading the material for this topic');
   const input = await lessonInput(ctx, topicId, depth);
   if (input.pages.length === 0) {
     throw new Error('No material pages to ground the lesson. Read material first.');
   }
-  report(12, 'Planning the lesson objective');
+  report(12, `Planning the lesson objective${withModel}`);
 
   let objective = `Explain ${input.topicTitle} and apply it to an exam question.`;
   let why = '';
@@ -412,7 +416,7 @@ export async function buildTeachingLesson(
     // The skeleton and the notes are enough to continue.
   }
 
-  report(14, 'Planning the slides');
+  report(14, `Planning the slides${withModel}`);
   const plan = await planBeats(ctx, input, objective, depth);
   const onSlide = options.onSlide ?? (() => {});
 
@@ -466,7 +470,7 @@ export async function buildTeachingLesson(
     const kind = planned.kind;
     report(
       18 + Math.round((beatIndex / Math.max(1, plan.length)) * 70),
-      `Writing slide ${beatIndex + 1} of ${plan.length}`,
+      `Writing slide ${beatIndex + 1} of ${plan.length}${withModel}`,
     );
     let beat: LessonBeat;
     try {

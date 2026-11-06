@@ -137,6 +137,11 @@ async function readIntoPages(
   const vision =
     config === null ? undefined : makeVisionReader(async () => config, options.signal);
   const ocrMaxEdge = config?.ocrMaxEdge ?? DEFAULT_OCR_MAX_EDGE;
+  // Name the model in every step that spends its time: the learner can see
+  // whether a slow page is a model call or the built-in OCR.
+  const ocrModel = config?.ocrModel ?? config?.chatModel ?? '';
+  const readBy = ocrModel === '' ? 'the OCR model' : ocrModel;
+  const embedModel = config?.embedModel ?? '';
   let visionError: string | null = null;
   const noteVisionError = (message: string) => {
     visionError = message;
@@ -175,8 +180,8 @@ async function readIntoPages(
       step(
         42,
         textless.length === pages.length
-          ? 'No text layer - reading every page as an image'
-          : `Reading ${textless.length} scanned page${textless.length === 1 ? '' : 's'} as images`,
+          ? `No text layer - ${readBy} reads every page`
+          : `Reading ${textless.length} scanned page${textless.length === 1 ? '' : 's'} with ${readBy}`,
       );
       const scanned = await extractScannedPdf(stored.data, {
         onlyPages: textless,
@@ -186,7 +191,7 @@ async function readIntoPages(
           step(
             42 + Math.round((page / Math.max(1, total)) * 43),
             method === 'vision'
-              ? `OCR model reading page ${page} of ${total}`
+              ? `${readBy} reading page ${page} of ${total}`
               : `OCR page ${page} of ${total}`,
             { number: page, total, method, chars },
           ),
@@ -199,7 +204,7 @@ async function readIntoPages(
     }
   } else if (mime.startsWith('image/')) {
     const base64 = arrayBufferToBase64(stored.data);
-    step(20, 'Reading the image');
+    step(20, vision === undefined ? 'Reading the image' : `Reading the image with ${readBy}`);
     let page: ExtractedPage | null = null;
     if (vision !== undefined) {
       try {
@@ -260,7 +265,7 @@ async function readIntoPages(
   let embedded = 0;
   if (config !== null && config.embedModel !== undefined && prefs.autoEmbedPages) {
     try {
-      step(96, 'Embedding pages for retrieval');
+      step(96, embedModel === '' ? 'Embedding pages for retrieval' : `Embedding pages with ${embedModel}`);
       embedded = await embedAndStorePages(
         driver,
         materialId,

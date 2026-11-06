@@ -183,7 +183,7 @@ export function pickLocalModels(models: readonly string[]): {
 }
 
 /** IDs that usually mean "this model can see images". */
-const VISION_HINT = /(?:\.|[/:_-])(vl|vision|llava|moondream|minicpm-v|gemma3|pixtral|internvl)/i;
+export const VISION_HINT = /(?:\.|[/:_-])(vl|vision|llava|moondream|minicpm-v|gemma3|pixtral|internvl)/i;
 
 /** Picks the first advertised model that looks vision-capable, or ''. */
 export function pickOcrModel(models: readonly string[]): string {

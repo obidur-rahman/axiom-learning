@@ -51,6 +51,13 @@ async function requireCourse(driver: DbDriver, courseId: string): Promise<Course
   return row as unknown as Course;
 }
 
+/** " with <chat model>" when one is configured, for progress text. */
+async function modelSuffix(): Promise<string> {
+  const config = await loadConfig().catch(() => null);
+  const model = config?.chatModel ?? '';
+  return model === '' ? '' : ` with ${model}`;
+}
+
 async function runJob(
   job: JobRow,
   db: AxiomDb,
@@ -128,10 +135,11 @@ async function runJob(
       }
       report(10, `Reading ${pages.length} page${pages.length === 1 ? '' : 's'}`);
       const ctx: RunContext = { db, course, config: loadConfig, signal };
+      const withModel = await modelSuffix();
       await buildTopicsStep(ctx, pages, (done, total) =>
         report(
           15 + Math.round((done / Math.max(1, total)) * 70),
-          `Extracting topics from part ${done} of ${total}`,
+          `Extracting topics${withModel}, part ${done} of ${total}`,
         ),
       );
       report(90, 'Saving the topic list');
@@ -140,7 +148,8 @@ async function runJob(
       const course = await requireCourse(driver, job.courseId);
       report(15, 'Loading the topics');
       const ctx: RunContext = { db, course, config: loadConfig, signal };
-      report(45, 'Proposing prerequisites with the model');
+      const withModel = await modelSuffix();
+      report(45, withModel === '' ? 'Proposing prerequisites with the model' : `Proposing prerequisites${withModel}`);
       await buildRoadmapStep(ctx);
       report(90, 'Saving the new roadmap');
       await complete(driver, job.id);
@@ -205,15 +214,17 @@ async function runJob(
       });
     } else if (job.jobType === 'extract_past_questions') {
       const course = await requireCourse(driver, job.courseId);
-      report(20, 'Reading the past-paper pages');
       const ctx: RunContext = { db, course, config: loadConfig, signal };
+      const withModel = await modelSuffix();
+      report(20, `Reading the past-paper pages${withModel}`);
       await extractPastQuestionsStep(ctx);
       report(90, 'Saving the questions');
       await complete(driver, job.id);
     } else if (job.jobType === 'generate_questions') {
       const course = await requireCourse(driver, job.courseId);
-      report(20, 'Writing questions from the notes');
       const ctx: RunContext = { db, course, config: loadConfig, signal };
+      const withModel = await modelSuffix();
+      report(20, `Writing questions from the notes${withModel}`);
       await generateQuestionsStep(ctx);
       report(90, 'Saving the questions');
       await complete(driver, job.id);

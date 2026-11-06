@@ -9,9 +9,12 @@
 import {
   LOCAL_PORTS,
   detectLocalProvider,
+  listHostedModels,
   normalizeBaseUrl,
+  pickHostedModels,
   pickLocalModels,
   pickOcrModel,
+  presetForBaseUrl,
   probeCapabilities,
   type Capabilities,
   type ProviderConfig,
@@ -159,6 +162,34 @@ export async function autoDetect(): Promise<ProviderForm | null> {
     ocrModel: pickOcrModel(detected.models),
     embedModel,
     mode: 'local',
+  };
+}
+
+/** What a hosted endpoint's model list gives the setup form. */
+export interface HostedFill {
+  baseUrl: string;
+  models: string[];
+  /** A known provider's label, or "the endpoint" for a custom URL. */
+  provider: string;
+  chatModel: string;
+  ocrModel: string;
+  embedModel: string;
+}
+
+/**
+ * Hosted counterpart of autoDetect: ask the endpoint what it can do, then fill
+ * one model per role. Unknown endpoints still get name-based guesses, so a
+ * custom OpenAI-compatible URL is not left with empty fields.
+ */
+export async function fillHostedModels(baseUrl: string, apiKey: string): Promise<HostedFill> {
+  await installProviderFetch();
+  const models = await listHostedModels(baseUrl, apiKey);
+  const preset = presetForBaseUrl(baseUrl);
+  return {
+    baseUrl,
+    models,
+    provider: preset?.label ?? 'the endpoint',
+    ...pickHostedModels(models, preset),
   };
 }
 
