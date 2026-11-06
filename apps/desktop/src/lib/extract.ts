@@ -6,7 +6,7 @@
  * the model fails. All heavy libraries load dynamically so the first paint of
  * the app stays fast.
  */
-import { beforeModelCall, getFetch, type ProviderConfig } from '@axiom/ai';
+import { beforeModelCall, getFetch, normalizeBaseUrl, type ProviderConfig } from '@axiom/ai';
 import {
   hasUsableText,
   meaningfulLength,
@@ -315,6 +315,38 @@ const VISION_SYSTEM_PROMPT = [
 
 const VISION_USER_PROMPT = 'Transcribe this page.';
 
+/** The message an OpenAI-compatible error body carries, if it carries one. */
+function providerErrorText(body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { error?: { message?: unknown } | string };
+    if (typeof parsed.error === 'string') return parsed.error;
+    if (typeof parsed.error?.message === 'string') return parsed.error.message;
+  } catch {
+    // Not JSON; fall through to the raw text.
+  }
+  return body.trim().slice(0, 200);
+}
+
+/**
+ * A failed OCR request has to say what to fix. A 404 from a hosted endpoint is
+ * nearly always a retired or misspelled model ID, not a broken URL.
+ */
+function visionErrorMessage(model: string, status: number, body: string): string {
+  const detail = providerErrorText(body);
+  const suffix = detail === '' ? '' : ` Provider said: ${detail}`;
+  if (status === 404) {
+    return (
+      `OCR model "${model}" was not found at the endpoint (HTTP 404). ` +
+      'It may have been retired; pick a current vision model in Settings.' +
+      suffix
+    );
+  }
+  if (status === 401 || status === 403) {
+    return `The OCR request was refused (HTTP ${status}). Check the API key in Settings.${suffix}`;
+  }
+  return `OCR read failed: HTTP ${status}.${suffix}`;
+}
+
 export function makeVisionReader(
   config: () => Promise<ProviderConfig | null>,
   signal?: AbortSignal,
@@ -326,7 +358,7 @@ export function makeVisionReader(
     // local runtime to it before the image is sent.
     const model = provider.ocrModel ?? provider.chatModel;
     await beforeModelCall(model, 'vision');
-    const response = await getFetch()(`${provider.baseUrl}/chat/completions`, {
+    const response = await getFetch()(`${normalizeBaseUrl(provider.baseUrl)}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -360,7 +392,10 @@ export function makeVisionReader(
         ],
       }),
     });
-    if (!response.ok) throw new Error(`OCR read failed: HTTP ${response.status}`);
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(visionErrorMessage(model, response.status, detail));
+    }
     const body = (await response.json()) as {
       choices?: { message?: { content?: string; reasoning?: string } }[];
     };
