@@ -52,6 +52,11 @@ class FakeDriver implements DbDriver {
       const rows = this.tables[table] ?? [];
       return [{ c: rows.filter((row) => row['id'] === params[0]).length } as unknown as T];
     }
+    // Topic lookups are by global primary key; honor the id so a course that
+    // does not own another course's id sees it as free.
+    if (/from\s+topics\s+where\s+id\s*=\s*\$1/i.test(sql)) {
+      return (this.tables['topics'] ?? []).filter((row) => row['id'] === params[0]) as T[];
+    }
     // Same for COALESCE(MAX(col), 0) + 1 AS alias (version/seq counters).
     const maxInc = /select\s+coalesce\(max\(([a-z_]+)\),\s*0\)\s*\+\s*1\s+as\s+([a-z_]+)\s+from\s+([a-z_]+)/i.exec(sql);
     if (maxInc) {
@@ -123,8 +128,8 @@ describe('roadmap persistence', () => {
   function baseDriver(): FakeDriver {
     return new FakeDriver({
       topics: [
-        { id: 't1', title: 'Ohm law', parent_id: null, syllabus_order: 1 },
-        { id: 't2', title: 'RC circuits', parent_id: null, syllabus_order: 2 },
+        { id: 't1', course_id: 'c1', title: 'Ohm law', parent_id: null, syllabus_order: 1 },
+        { id: 't2', course_id: 'c1', title: 'RC circuits', parent_id: null, syllabus_order: 2 },
       ],
       topic_edges: [
         { prerequisite_id: 't1', topic_id: 't2', confidence: 0.9, source: 'shared' },
@@ -222,6 +227,29 @@ describe('roadmap persistence', () => {
     await upsertTopics(fake, 'c1', [{ id: 't1', title: 'Ohm law (renamed)' }]);
     expect(fake.calls.some((call) => call.sql.includes('UPDATE topics'))).toBe(true);
     expect(fake.calls.some((call) => call.sql.includes('INSERT INTO topics'))).toBe(false);
+  });
+
+  it('never overwrites a topic id owned by another course', async () => {
+    const fake = new FakeDriver({
+      topics: [{ id: 'T1', course_id: 'c1', title: 'Ohm law' }],
+    });
+    const saved = await upsertTopics(fake, 'c2', [{ id: 'c2:T1', title: 'Quantum states' }]);
+    expect(saved[0]!.id).toBe('c2:T1');
+    expect(fake.calls.some((call) => call.sql.includes('UPDATE topics'))).toBe(false);
+    const insert = fake.calls.find((call) => call.sql.includes('INSERT INTO topics'));
+    expect(insert?.params[0]).toBe('c2:T1');
+    expect(insert?.params[1]).toBe('c2');
+  });
+
+  it('adopts the legacy T1 row its own course already has', async () => {
+    const fake = new FakeDriver({
+      topics: [{ id: 'T1', course_id: 'c1', title: 'Old title' }],
+    });
+    const saved = await upsertTopics(fake, 'c1', [{ id: 'c1:T1', title: 'Ohm law' }]);
+    expect(saved[0]!.id).toBe('T1');
+    const update = fake.calls.find((call) => call.sql.includes('UPDATE topics'));
+    expect(update?.params[3]).toBe('T1');
+    expect(update?.params[4]).toBe('c1');
   });
 
   it('replaces the edge set in one shot', async () => {

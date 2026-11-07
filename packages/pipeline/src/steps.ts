@@ -177,13 +177,18 @@ export async function buildTopicsStep(
     }
     onProgress?.(index + 1, chunks.length);
   }
-  const topics = [...titles.values()].map((title, index) => ({ id: `T${index + 1}`, title }));
+  // The model's ids are per-request labels, not database keys. Scope ours to
+  // the course so two courses can both have a T1 topic without colliding.
+  const topics = [...titles.values()].map((title, index) => ({
+    id: `${ctx.course.id}:T${index + 1}`,
+    title,
+  }));
   if (topics.length === 0) {
     throw new PipelineError('schema', 'The model found no topics in this material.');
   }
-  await upsertTopics(ctx.db.driver, ctx.course.id, topics, 'syllabus');
+  const saved = await upsertTopics(ctx.db.driver, ctx.course.id, topics, 'syllabus');
   await recalculateWeights(ctx);
-  return topics;
+  return saved;
 }
 
 /**

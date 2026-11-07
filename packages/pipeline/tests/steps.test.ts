@@ -18,13 +18,17 @@ class FakeDriver implements DbDriver {
     if (sql.includes('INSERT INTO topics') || sql.includes('REPLACE INTO topics')) {
       this.tables['topics']!.push({
         id: String(params[0]),
+        course_id: String(params[1]),
         title: String(params[2]),
         syllabus_order: Number(params[3]),
         created_at: new Date().toISOString(),
       });
     } else if (sql.includes('UPDATE topics SET title')) {
-      const row = (this.tables['topics'] ?? []).find((row) => row['id'] === params[1]);
-      if (row) row['title'] = params[0];
+      const row = (this.tables['topics'] ?? []).find((row) => row['id'] === params[3]);
+      if (row) {
+        row['title'] = params[0];
+        row['syllabus_order'] = params[1];
+      }
     } else if (sql.includes('REPLACE INTO topic_weights')) {
       this.tables['topic_weights']!.push({ topic_id: String(params[0]), weight: Number(params[6]) });
     } else if (sql.includes('INSERT INTO topic_edges')) {
@@ -50,6 +54,9 @@ class FakeDriver implements DbDriver {
       const countTable = /count\(\*\)\s+as\s+c\s+from\s+([a-z_]+)/i.exec(sql)![1]!;
       const stored = this.tables[countTable] ?? [];
       return [{ c: stored.filter((row) => row['id'] === params[0]).length } as unknown as T];
+    }
+    if (/from\s+topics\s+where\s+id\s*=\s*\$1/i.test(sql)) {
+      return (this.tables['topics'] ?? []).filter((row) => row['id'] === params[0]) as T[];
     }
     const maxInc = /select\s+coalesce\(max\(([a-z_]+)\),\s*0\)\s*\+\s*1\s+as\s+([a-z_]+)\s+from\s+([a-z_]+)/i.exec(sql);
     if (maxInc) {
@@ -118,6 +125,7 @@ describe('buildTopicsStep', () => {
     );
     const topics = await buildTopicsStep(ctx, [{ text: 'Page content about Ohm law.' }]);
     expect(topics).toHaveLength(2);
+    expect(topics.map((topic) => topic.id)).toEqual(['c1:T1', 'c1:T2']);
     const inserts = driver.calls.filter((call) => call.sql.includes('INSERT INTO topics'));
     expect(inserts).toHaveLength(2);
     expect(driver.calls.some((call) => call.sql.includes('REPLACE INTO topic_weights'))).toBe(true);

@@ -36,33 +36,73 @@ const EDGE_SOURCE_TO_DB = {
   manual: 'user',
 } as const;
 
-/** Save or update the topic list (pipeline step 2 output or manual edits). */
+/** The course that owns a topic id, or undefined when the id is free. */
+async function topicOwner(db: DbDriver, id: string): Promise<string | undefined> {
+  const rows = await db.select<{ course_id: string }>(
+    'SELECT course_id FROM topics WHERE id = $1',
+    [id],
+  );
+  return rows[0]?.course_id;
+}
+
+/**
+ * Save or update the topic list (pipeline step 2 output or manual edits).
+ *
+ * Topic ids are a global primary key, but every pipeline step provides ids
+ * relative to one course. Earlier builds minted `T1..Tn` for every course, so
+ * building course B updated course A's `T1` row and gave B no topic of its own.
+ * Ids now live in a per-course namespace (`<courseId>:T1`), and a request for
+ * an id another course owns is redirected instead of overwriting that row.
+ * The first rebuild after the fix adopts this course's legacy `T1` rows, which
+ * keeps their progress, questions and lessons attached.
+ */
 export async function upsertTopics(
   db: DbDriver,
   courseId: string,
   topics: Topic[],
   source: 'syllabus' | 'notes' | 'user' | 'premade' = 'user',
-): Promise<void> {
+): Promise<Topic[]> {
+  const prefix = `${courseId}:`;
+  const saved: Topic[] = [];
   let order = 0;
   for (const topic of topics) {
     order += 1;
-    const existing = await db.select<{ c: number }>(
-      'SELECT COUNT(*) AS c FROM topics WHERE id = $1',
-      [topic.id],
-    );
-    if (existing[0] && existing[0].c > 0) {
-      await db.execute('UPDATE topics SET title = $1 WHERE id = $2', [
-        topic.title,
-        topic.id,
-      ]);
+    let id = topic.id;
+    let owner = await topicOwner(db, id);
+    if (owner !== undefined && owner !== courseId) {
+      // The id belongs to another course: never touch that row. Mint a new id
+      // in this course's own namespace instead.
+      id = `${prefix}${topic.id}`;
+      owner = await topicOwner(db, id);
+      if (owner !== undefined && owner !== courseId) {
+        id = `${prefix}${uuid()}`;
+        owner = undefined;
+      }
+    } else if (owner === undefined && id.startsWith(prefix)) {
+      // A build before ids were scoped made this course's rows `T1..Tn`.
+      // Reuse that row so a rebuild does not leave a duplicate behind.
+      const legacyId = id.slice(prefix.length);
+      if ((await topicOwner(db, legacyId)) === courseId) {
+        id = legacyId;
+        owner = courseId;
+      }
+    }
+    if (owner === courseId) {
+      await db.execute(
+        `UPDATE topics SET title = $1, syllabus_order = $2, source = $3
+         WHERE id = $4 AND course_id = $5`,
+        [topic.title, order, source, id, courseId],
+      );
     } else {
       await db.execute(
         `INSERT INTO topics (id, course_id, parent_id, title, description, syllabus_order, source, shared_concept_id)
          VALUES ($1, $2, NULL, $3, NULL, $4, $5, NULL)`,
-        [topic.id, courseId, topic.title, order, source],
+        [id, courseId, topic.title, order, source],
       );
     }
+    saved.push({ ...topic, id });
   }
+  return saved;
 }
 
 /** Replace the prerequisite edges of a course (base graph only). */
