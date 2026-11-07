@@ -7,6 +7,14 @@ loose [Keep a Changelog](https://keepachangelog.com) shape and uses
 ## [Unreleased]
 
 ### Added
+- **Backup provider chain** — add several keys or endpoints in Settings; when
+  one hits a rate or daily limit, rejects its key or loses the model, Axiom
+  moves to the next profile. The last profile waits out a short rate limit
+  instead of failing the job, and every key lives separately in the OS
+  credential store.
+- **Rate-limit recovery** — hosted 429s are waited out using the provider's
+  `retry-after` hint, and **Re-read** returns a material page to the vision
+  model without redoing the whole file.
 - **Hosted provider auto-setup** — pick Groq, OpenRouter, OpenAI, Google
   Gemini, Mistral, Cerebras or xAI and the base URL fills in; paste an API key
   and the chat, OCR and embedding models are read from the endpoint's live
@@ -14,6 +22,12 @@ loose [Keep a Changelog](https://keepachangelog.com) shape and uses
 - **Model names in progress** — reading, OCR, embedding and content-generation
   steps now name the model doing the work, in the activity rail and in the
   in-page progress cards.
+
+### Fixed
+- Topic IDs are course-scoped, so a second course can no longer adopt or
+  overwrite another course's topics during a roadmap rebuild.
+- Duplicate page citations no longer crash the lesson board, pipeline or
+  lessons list.
 
 ## [0.1.0] - 2026-11-06 — Alpha
 
