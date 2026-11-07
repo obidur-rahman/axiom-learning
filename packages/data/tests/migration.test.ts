@@ -4,7 +4,9 @@ import {
   createCourse,
   getProviderSettings,
   initDb,
+  listProviderFallbacks,
   resetCourse,
+  saveProviderFallbacks,
   saveProviderSettings,
   type DbDriver,
 } from '../src';
@@ -47,7 +49,7 @@ afterEach(() => {
 });
 
 describe('schema migration', () => {
-  it('creates the schema v3 tables on a fresh database', async () => {
+  it('creates the schema v4 tables on a fresh database', async () => {
     const { driver, close } = realDriver();
     open.push(close);
     await initDb(driver);
@@ -55,7 +57,7 @@ describe('schema migration', () => {
     const version = await driver.select<{ value: string }>(
       "SELECT value FROM schema_meta WHERE key = 'schema_version'",
     );
-    expect(version[0]?.value).toBe('3');
+    expect(version[0]?.value).toBe('4');
 
     const tables = await driver.select<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
@@ -66,6 +68,7 @@ describe('schema migration', () => {
     expect(names).toContain('exam_question_topics');
     expect(names).toContain('study_attempts');
     expect(names).toContain('lesson_documents');
+    expect(names).toContain('provider_fallbacks');
 
     // New job types pass the rebuilt CHECK constraint.
     await driver.execute(
@@ -123,7 +126,51 @@ describe('schema migration', () => {
     const version = await driver.select<{ value: string }>(
       "SELECT value FROM schema_meta WHERE key = 'schema_version'",
     );
-    expect(version[0]?.value).toBe('3');
+    expect(version[0]?.value).toBe('4');
+  });
+
+  it('round-trips fallback profiles in priority order', async () => {
+    const { driver, close } = realDriver();
+    open.push(close);
+    await initDb(driver);
+
+    const first = {
+      id: 'f1',
+      label: 'Groq key 2',
+      baseUrl: 'https://api.groq.com/openai/v1',
+      chatModel: 'openai/gpt-oss-20b',
+      ocrModel: 'qwen/qwen3.8-27b',
+      embedModel: null,
+      mode: 'hosted' as const,
+      ocrThink: false,
+      chatThink: false,
+      ocrMaxEdge: 1400,
+      ocrMaxTokens: 1024,
+      singleModelMode: true,
+      autoUnload: true,
+      enabled: true,
+      priority: 0,
+    };
+    const second = {
+      ...first,
+      id: 'f2',
+      label: 'OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      embedModel: 'text-embedding-3-small',
+      enabled: false,
+    };
+
+    await saveProviderFallbacks(driver, [first, second]);
+    expect(await listProviderFallbacks(driver)).toEqual([
+      { ...first, priority: 0 },
+      { ...second, priority: 1 },
+    ]);
+
+    // Rewriting replaces the list; order is the new priority.
+    await saveProviderFallbacks(driver, [{ ...second, enabled: true, priority: 0 }, first]);
+    const saved = await listProviderFallbacks(driver);
+    expect(saved.map((row) => row.id)).toEqual(['f2', 'f1']);
+    expect(saved[0]).toMatchObject({ label: 'OpenRouter', enabled: true, priority: 0 });
   });
 
   it('round-trips the per-role model settings through SQLite', async () => {

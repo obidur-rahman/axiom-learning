@@ -190,6 +190,26 @@ export const MIGRATIONS: string[] = [
     detected_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
   );`,
+  `CREATE TABLE IF NOT EXISTS provider_fallbacks (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    chat_model TEXT NOT NULL,
+    ocr_model TEXT,
+    embed_model TEXT,
+    mode TEXT NOT NULL DEFAULT 'hosted' CHECK (mode IN ('local','hosted')),
+    ocr_think INTEGER NOT NULL DEFAULT 0,
+    chat_think INTEGER NOT NULL DEFAULT 0,
+    ocr_max_edge INTEGER NOT NULL DEFAULT 1400,
+    ocr_max_tokens INTEGER NOT NULL DEFAULT 1024,
+    single_model_mode INTEGER NOT NULL DEFAULT 1,
+    auto_unload INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    priority INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  );`,
+  `CREATE INDEX IF NOT EXISTS provider_fallbacks_order_idx
+     ON provider_fallbacks (enabled, priority);`,
   `CREATE TABLE IF NOT EXISTS material_embeddings (
     material_id TEXT NOT NULL,
     page_number INTEGER NOT NULL,

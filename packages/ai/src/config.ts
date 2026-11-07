@@ -29,6 +29,20 @@ export const ProviderConfigSchema = z.object({
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
 /**
+ * A provider plus the endpoints tried, in order, when the first one fails.
+ * `fallbacks` is never serialized into a request; it only drives the retry
+ * loop inside chat/chatJson/embed.
+ */
+export type ProviderChain = ProviderConfig & { fallbacks?: ProviderConfig[] };
+
+/** The primary profile followed by its enabled fallbacks. */
+export function providerAttempts(config: ProviderConfig): ProviderConfig[] {
+  const fallbacks = (config as ProviderChain).fallbacks;
+  if (!Array.isArray(fallbacks) || fallbacks.length === 0) return [config];
+  return [config, ...fallbacks];
+}
+
+/**
  * Capability probe result (pivot plan: features expand or shrink with these).
  */
 export const CapabilitiesSchema = z.object({

@@ -241,6 +241,12 @@ endpoint can actually do and shows a capability summary. Features expand or
 shrink with what your provider supports — embeddings off, for example, falls
 back to keyword retrieval.
 
+**Backup providers** keep long jobs alive on free tiers. Add extra keys or
+endpoints under the main provider, ordered, and Axiom moves down the list when
+one hits a rate or daily limit, rejects its key, or loses the model. Each
+profile has its own key in the credential store; the last one still waits out
+a short rate limit instead of failing the job.
+
 Material text is always data, never instructions: the pipeline keeps model
 output behind Zod schemas and renders lesson content as structured blocks, not
 arbitrary HTML.

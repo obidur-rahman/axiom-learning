@@ -81,6 +81,80 @@ export async function getProviderSettings(db: DbDriver): Promise<ProviderSetting
   return rows.length > 0 ? rowToSettings(rows[0]!) : null;
 }
 
+/** One extra endpoint tried when the main provider cannot serve a request. */
+export interface ProviderFallback extends ProviderSettings {
+  id: string;
+  label: string;
+  /** Disabled profiles stay stored but are skipped by the fallback chain. */
+  enabled: boolean;
+  /** Lower runs first; the settings screen keeps this equal to list order. */
+  priority: number;
+}
+
+interface FallbackRow extends ProviderRow {
+  id: string;
+  label: string;
+  enabled: number;
+  priority: number;
+}
+
+function rowToFallback(row: FallbackRow): ProviderFallback {
+  return {
+    ...rowToSettings(row),
+    id: row.id,
+    label: row.label,
+    enabled: row.enabled !== 0,
+    priority: Number(row.priority ?? 0),
+  };
+}
+
+/** Fallback profiles in try order. */
+export async function listProviderFallbacks(db: DbDriver): Promise<ProviderFallback[]> {
+  const rows = await db.select<FallbackRow>(
+    `SELECT id, label, base_url, chat_model, ocr_model, embed_model, mode,
+            ocr_think, chat_think, ocr_max_edge, ocr_max_tokens,
+            single_model_mode, auto_unload, enabled, priority
+     FROM provider_fallbacks
+     ORDER BY priority, updated_at`,
+  );
+  return rows.map(rowToFallback);
+}
+
+/** Replaces the whole fallback list; the array order is the try order. */
+export async function saveProviderFallbacks(
+  db: DbDriver,
+  fallbacks: readonly ProviderFallback[],
+): Promise<void> {
+  await db.execute('DELETE FROM provider_fallbacks');
+  for (const [index, fallback] of fallbacks.entries()) {
+    await db.execute(
+      `INSERT INTO provider_fallbacks
+         (id, label, base_url, chat_model, ocr_model, embed_model, mode,
+          ocr_think, chat_think, ocr_max_edge, ocr_max_tokens,
+          single_model_mode, auto_unload, enabled, priority, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+               strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+      [
+        fallback.id,
+        fallback.label,
+        fallback.baseUrl,
+        fallback.chatModel,
+        fallback.ocrModel,
+        fallback.embedModel,
+        fallback.mode,
+        fallback.ocrThink ? 1 : 0,
+        fallback.chatThink ? 1 : 0,
+        fallback.ocrMaxEdge,
+        fallback.ocrMaxTokens,
+        fallback.singleModelMode ? 1 : 0,
+        fallback.autoUnload ? 1 : 0,
+        fallback.enabled ? 1 : 0,
+        index,
+      ],
+    );
+  }
+}
+
 export async function saveProviderSettings(
   db: DbDriver,
   settings: ProviderSettings,

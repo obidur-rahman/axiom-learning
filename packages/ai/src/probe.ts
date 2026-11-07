@@ -108,7 +108,7 @@ export async function probeCapabilities(
         },
       ],
       {
-        model: config.ocrModel ?? config.chatModel,
+        modelRole: 'ocr',
         maxTokens: 256,
         temperature: 0,
         signal: createTimeout(),

@@ -17,7 +17,7 @@ import {
   presetForBaseUrl,
   probeCapabilities,
   type Capabilities,
-  type ProviderConfig,
+  type ProviderChain,
 } from '@axiom/ai';
 import { installModelManager, invalidateModelCaches, withoutModelSwitching } from './model-manager';
 import { installProviderFetch } from './provider-http';
@@ -27,12 +27,15 @@ import {
   OCR_DEFAULT_MAX_TOKENS,
   capabilitiesToStored,
   getProviderSettings,
+  listProviderFallbacks,
+  saveProviderFallbacks,
   saveProviderSettings,
   settingsToProviderConfig,
+  type ProviderSettings,
   type StoredCapabilities,
 } from '@axiom/data';
 import { getDb } from './db';
-import { getSecret, isDesktopRuntime, setSecret } from './tauri';
+import { deleteSecret, getSecret, isDesktopRuntime, setSecret } from './tauri';
 
 export const DEFAULT_CHAT_MODEL = 'qwen2.5:7b';
 export const DEFAULT_EMBED_MODEL = 'nomic-embed-text';
@@ -73,11 +76,14 @@ function emptyForm(apiKey: string): ProviderForm {
   };
 }
 
-export async function loadForm(): Promise<ProviderForm> {
-  const db = await getDb();
-  const settings = await getProviderSettings(db.driver);
-  const apiKey = (await getSecret(ACCOUNT_DEFAULT)) ?? '';
-  if (settings === null) return emptyForm(apiKey);
+/** One fallback profile in the settings form, with its own secure-store key. */
+export interface FallbackForm extends ProviderForm {
+  id: string;
+  label: string;
+  enabled: boolean;
+}
+
+function settingsToForm(settings: ProviderSettings, apiKey: string): ProviderForm {
   return {
     baseUrl: settings.baseUrl,
     chatModel: settings.chatModel,
@@ -92,6 +98,81 @@ export async function loadForm(): Promise<ProviderForm> {
     singleModelMode: settings.singleModelMode,
     autoUnload: settings.autoUnload,
   };
+}
+
+export async function loadForm(): Promise<ProviderForm> {
+  const db = await getDb();
+  const settings = await getProviderSettings(db.driver);
+  const apiKey = (await getSecret(ACCOUNT_DEFAULT)) ?? '';
+  if (settings === null) return emptyForm(apiKey);
+  return settingsToForm(settings, apiKey);
+}
+
+/** A new blank fallback, ready to edit in the settings screen. */
+export function newFallbackForm(label: string): FallbackForm {
+  return {
+    ...emptyForm(''),
+    id: crypto.randomUUID(),
+    label,
+    enabled: true,
+    mode: 'hosted',
+  };
+}
+
+export function fallbackAccount(id: string): string {
+  return `fallback:${id}`;
+}
+
+/** Saved fallback profiles in try order, each with its key from the secure store. */
+export async function loadFallbacks(): Promise<FallbackForm[]> {
+  const db = await getDb();
+  const rows = await listProviderFallbacks(db.driver);
+  return Promise.all(
+    rows.map(async (row) => ({
+      ...settingsToForm(row, (await getSecret(fallbackAccount(row.id))) ?? ''),
+      id: row.id,
+      label: row.label,
+      enabled: row.enabled,
+    })),
+  );
+}
+
+/** Save every fallback profile and its key; removed profiles lose their key. */
+export async function saveFallbacks(forms: readonly FallbackForm[]): Promise<void> {
+  const db = await getDb();
+  const previous = await listProviderFallbacks(db.driver);
+  const kept = new Set(forms.map((form) => form.id));
+  await saveProviderFallbacks(
+    db.driver,
+    forms.map((form, index) => {
+      const ocrModel = form.ocrModel.trim();
+      const embedModel = form.embedModel.trim();
+      return {
+        id: form.id,
+        label: form.label.trim() === '' ? `Provider ${index + 1}` : form.label.trim(),
+        baseUrl: normalizeBaseUrl(form.baseUrl.trim()),
+        chatModel: form.chatModel.trim(),
+        ocrModel: ocrModel === '' ? null : ocrModel,
+        embedModel: embedModel === '' ? null : embedModel,
+        mode: form.mode,
+        ocrThink: form.ocrThink,
+        chatThink: form.chatThink,
+        ocrMaxEdge: form.ocrMaxEdge,
+        ocrMaxTokens: form.ocrMaxTokens,
+        singleModelMode: form.singleModelMode,
+        autoUnload: form.autoUnload,
+        enabled: form.enabled,
+        priority: index,
+      };
+    }),
+  );
+  for (const form of forms) {
+    await setSecret(fallbackAccount(form.id), form.apiKey ?? '');
+  }
+  for (const row of previous) {
+    if (!kept.has(row.id)) await deleteSecret(fallbackAccount(row.id));
+  }
+  invalidateModelCaches();
 }
 
 export async function saveForm(form: ProviderForm): Promise<void> {
@@ -121,12 +202,23 @@ export async function saveForm(form: ProviderForm): Promise<void> {
   invalidateModelCaches();
 }
 
-export async function loadConfig(): Promise<ProviderConfig | null> {
+export async function loadConfig(): Promise<ProviderChain | null> {
   const db = await getDb();
   const settings = await getProviderSettings(db.driver);
   if (settings === null) return null;
   const apiKey = (await getSecret(ACCOUNT_DEFAULT)) ?? undefined;
-  return settingsToProviderConfig(settings, apiKey);
+  const primary: ProviderChain = settingsToProviderConfig(settings, apiKey);
+  const fallbacks = (await listProviderFallbacks(db.driver)).filter((row) => row.enabled);
+  if (fallbacks.length === 0) return primary;
+  primary.fallbacks = await Promise.all(
+    fallbacks.map(async (row) =>
+      settingsToProviderConfig(
+        row,
+        (await getSecret(fallbackAccount(row.id))) ?? undefined,
+      ),
+    ),
+  );
+  return primary;
 }
 
 /** Doubles as one capability cache per webview session. */

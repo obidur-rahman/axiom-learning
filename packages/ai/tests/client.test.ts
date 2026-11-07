@@ -114,3 +114,97 @@ describe('client', () => {
     expect(() => parseLenientJson('nope')).toThrowError();
   });
 });
+
+describe('provider fallback chain', () => {
+  interface Scripted {
+    status?: number;
+    body: object;
+    headers?: Record<string, string>;
+  }
+
+  function scripted(...steps: Scripted[]): FetchStub {
+    const queue = [...steps];
+    const stub = vi.fn(async () => {
+      const step = queue.shift() ?? { body: {} };
+      return new Response(JSON.stringify(step.body), {
+        status: step.status ?? 200,
+        headers: { 'Content-Type': 'application/json', ...(step.headers ?? {}) },
+      });
+    });
+    vi.stubGlobal('fetch', stub);
+    return stub;
+  }
+
+  const backup: ProviderConfig = {
+    baseUrl: 'https://backup.example/api',
+    apiKey: 'sk-backup',
+    chatModel: 'backup-chat',
+    embedModel: 'backup-embed',
+  };
+
+  it('chat moves to the next profile on a rate limit', async () => {
+    const stub = scripted(
+      { status: 429, body: { error: 'slow down' }, headers: { 'retry-after': '0' } },
+      { body: { choices: [{ message: { content: 'from backup' } }] } },
+    );
+    const result = await chat(
+      { ...config, fallbacks: [backup] },
+      [{ role: 'user', content: 'hello' }],
+    );
+    expect(result.content).toBe('from backup');
+    expect(stub).toHaveBeenCalledTimes(2);
+    const [url, init] = stub.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe('https://backup.example/api/v1/chat/completions');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-backup');
+  });
+
+  it('chat moves on for a rejected key but not for a bad request', async () => {
+    const rotated = scripted(
+      { status: 401, body: { error: 'bad key' } },
+      { body: { choices: [{ message: { content: 'ok' } }] } },
+    );
+    await expect(
+      chat({ ...config, fallbacks: [backup] }, [{ role: 'user', content: 'hi' }]),
+    ).resolves.toMatchObject({ content: 'ok' });
+    expect(rotated).toHaveBeenCalledTimes(2);
+
+    const rejected = scripted({ status: 400, body: { error: 'bad prompt' } });
+    await expect(
+      chat({ ...config, fallbacks: [backup] }, [{ role: 'user', content: 'hi' }]),
+    ).rejects.toThrowError(ProviderError);
+    expect(rejected).toHaveBeenCalledTimes(1);
+  });
+
+  it('chatJson tries the next profile when a model cannot produce the schema', async () => {
+    const stub = scripted(
+      { body: { choices: [{ message: { content: 'not json' } }] } },
+      { body: { choices: [{ message: { content: 'still not json' } }] } },
+      { body: { choices: [{ message: { content: '{"title":"x","count":2}' } }] } },
+    );
+    const schema = z.object({ title: z.string(), count: z.number() });
+    const { data } = await chatJson(
+      { ...config, fallbacks: [backup] },
+      schema,
+      [{ role: 'user', content: '?' }],
+      { retries: 1 },
+    );
+    expect(data).toEqual({ title: 'x', count: 2 });
+    // Two attempts on the primary, then the fallback.
+    expect(stub).toHaveBeenCalledTimes(3);
+    const [url] = stub.mock.calls[2] as [string, RequestInit];
+    expect(url).toBe('https://backup.example/api/v1/chat/completions');
+  });
+
+  it('embed skips profiles without an embedding model', async () => {
+    const stub = scripted({ body: { data: [{ index: 0, embedding: [9] }] } });
+    const { vectors } = await embed(
+      { ...config, embedModel: undefined, fallbacks: [backup] },
+      ['a'],
+    );
+    expect(vectors).toEqual([[9]]);
+    expect(stub).toHaveBeenCalledTimes(1);
+    const [url, init] = stub.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://backup.example/api/v1/embeddings');
+    expect(JSON.parse(init.body as string).model).toBe('backup-embed');
+  });
+});

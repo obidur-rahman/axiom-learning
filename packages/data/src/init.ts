@@ -9,7 +9,7 @@ import * as questionsRepo from './questions';
 import * as studyRepo from './study';
 import * as lessonDocsRepo from './lesson-docs';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 async function tableExists(driver: DbDriver, name: string): Promise<boolean> {
   const rows = await driver.select<{ name: string }>(
@@ -60,6 +60,11 @@ export async function initDb(driver: DbDriver): Promise<void> {
   if (version < 3) {
     await ensureProviderConfigColumns(driver);
     version = 3;
+  }
+
+  // v4 adds provider_fallbacks; MIGRATIONS above already created it.
+  if (version < 4) {
+    version = 4;
   }
 
   await driver.execute(

@@ -1,4 +1,5 @@
 import type { ProviderConfig } from './config';
+import { providerAttempts } from './config';
 import { fetchWithRetry } from './http';
 import type { ZodType } from 'zod';
 
@@ -10,6 +11,8 @@ export interface ChatMessage {
 
 export interface ChatOptions {
   model?: string;
+  /** Pick the OCR/vision model for this request on every provider. */
+  modelRole?: 'chat' | 'ocr';
   temperature?: number;
   maxTokens?: number;
   /**
@@ -92,6 +95,7 @@ async function postJson(
   path: string,
   body: unknown,
   signal?: AbortSignal,
+  retries?: number,
 ): Promise<unknown> {
   const response = await fetchWithRetry(
     `${normalizeBaseUrl(config.baseUrl)}${path}`,
@@ -101,7 +105,7 @@ async function postJson(
       body: JSON.stringify(body),
       signal,
     },
-    { signal },
+    { signal, ...(retries === undefined ? {} : { retries }) },
   );
   if (!response.ok) {
     const text = await response.text().catch(() => '');
@@ -120,14 +124,36 @@ export class ProviderError extends Error {
 }
 
 /**
- * Non-streaming chat completion through an OpenAI-compatible endpoint.
+ * Statuses that mean this key/endpoint/model cannot serve this request right
+ * now. A missing status is a transport failure (timeout, DNS, bad JSON), which
+ * the next provider may survive; a 400 caused by our own prompt is unlikely to.
  */
-export async function chat(
+const FAILOVER_STATUS = new Set([401, 403, 404, 408, 409, 425, 429]);
+
+export function shouldTryNextProvider(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted === true) return false;
+  if (error instanceof ProviderError) {
+    if (error.status === undefined) return true;
+    return FAILOVER_STATUS.has(error.status) || error.status >= 500;
+  }
+  return true;
+}
+
+/**
+ * One provider's chat completion. The public `chat` below walks the fallback
+ * chain, so this function never retries a different endpoint.
+ */
+async function chatOnce(
   config: ProviderConfig,
   messages: ChatMessage[],
-  options: ChatOptions = {},
+  options: ChatOptions,
+  retries?: number,
 ): Promise<ChatResult> {
-  const model = options.model ?? config.chatModel;
+  const model =
+    options.model ??
+    (options.modelRole === 'ocr'
+      ? (config.ocrModel ?? config.chatModel)
+      : config.chatModel);
   const body: Record<string, unknown> = {
     model,
     messages,
@@ -141,8 +167,14 @@ export async function chat(
     // the only portable way to switch a thinking template off.
     if (!options.think) body.chat_template_kwargs = { enable_thinking: false };
   }
-  await beforeModelCall(model, 'chat');
-  const data = (await postJson(config, '/chat/completions', body, options.signal)) as {
+  await beforeModelCall(model, options.modelRole === 'ocr' ? 'vision' : 'chat');
+  const data = (await postJson(
+    config,
+    '/chat/completions',
+    body,
+    options.signal,
+    retries,
+  )) as {
     choices?: { message?: { content?: string; reasoning?: string; reasoning_content?: string } }[];
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     model?: string;
@@ -170,6 +202,36 @@ export async function chat(
 }
 
 /**
+ * Non-streaming chat completion through an OpenAI-compatible endpoint. When
+ * the config carries fallbacks, an auth/limit/retired-model failure moves to
+ * the next profile instead of failing the job. Limits are given only a short
+ * chance on a non-final profile so a dead key does not stall the queue.
+ */
+export async function chat(
+  config: ProviderConfig,
+  messages: ChatMessage[],
+  options: ChatOptions = {},
+): Promise<ChatResult> {
+  const attempts = providerAttempts(config);
+  let lastError: unknown;
+  for (const [index, attempt] of attempts.entries()) {
+    const last = index === attempts.length - 1;
+    try {
+      return await chatOnce(
+        attempt,
+        messages,
+        options,
+        last ? (attempts.length > 1 ? 4 : undefined) : 0,
+      );
+    } catch (error) {
+      lastError = error;
+      if (last || !shouldTryNextProvider(error, options.signal)) throw error;
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Chat that must return JSON which passes `schema`. Sends the JSON shape as
  * part of the request (structured output where available), parses leniently,
  * and retries up to `retries` times when parsing or validation fails
@@ -182,7 +244,7 @@ export async function chatJson<T>(
   options: ChatOptions & { retries?: number } = {},
 ): Promise<{ data: T; raw: string; usage?: ChatUsage }> {
   const retries = options.retries ?? 2;
-  const shaped: ChatMessage[] = [
+  const base: ChatMessage[] = [
     {
       role: 'system',
       content:
@@ -191,25 +253,44 @@ export async function chatJson<T>(
     },
     ...messages,
   ];
+  const providers = providerAttempts(config);
   let lastError: unknown;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const result = await chat(config, shaped, {
-      ...options,
-      temperature: options.temperature ?? 0,
-    });
-    try {
-      const parsed = parseLenientJson(result.content);
-      return { data: schema.parse(parsed), raw: result.content, usage: result.usage };
-    } catch (error) {
-      lastError = error;
-      // One repair nudge, then strict attempts.
-      shaped.push({ role: 'assistant', content: result.content });
-      shaped.push({
-        role: 'user',
-        content: 'That was not valid JSON for the schema. Reply again with JSON only.',
-      });
+  for (const [index, provider] of providers.entries()) {
+    const shaped: ChatMessage[] = [...base];
+    let requestFailed = false;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      let result: ChatResult;
+      try {
+        result = await chat(provider, shaped, {
+          ...options,
+          temperature: options.temperature ?? 0,
+        });
+      } catch (error) {
+        lastError = error;
+        requestFailed = true;
+        break;
+      }
+      try {
+        const parsed = parseLenientJson(result.content);
+        return { data: schema.parse(parsed), raw: result.content, usage: result.usage };
+      } catch (error) {
+        lastError = error;
+        // One repair nudge, then strict attempts.
+        shaped.push({ role: 'assistant', content: result.content });
+        shaped.push({
+          role: 'user',
+          content: 'That was not valid JSON for the schema. Reply again with JSON only.',
+        });
+      }
     }
+    const last = index === providers.length - 1;
+    if (last) break;
+    // A 400/parse refusal will repeat on every provider; only move on for a
+    // failure the next endpoint can plausibly survive, or a model that cannot
+    // produce this shape at all.
+    if (requestFailed && !shouldTryNextProvider(lastError, options.signal)) throw lastError;
   }
+  if (lastError instanceof ProviderError) throw lastError;
   throw new ProviderError(
     `chatJson: schema validation failed after ${retries + 1} attempts: ${
       lastError instanceof Error ? lastError.message : String(lastError)
@@ -252,26 +333,40 @@ function zodShapeHint(schema: ZodType): unknown {
 
 /**
  * Embeddings through /v1/embeddings. Requires `embedModel` in the config.
+ * Fallbacks without an embedding model are skipped; the next one that has one
+ * is tried when the current endpoint rejects the request.
  */
 export async function embed(
   config: ProviderConfig,
   texts: string[],
   options: { signal?: AbortSignal } = {},
 ): Promise<EmbedResult> {
-  if (!config.embedModel) {
+  const attempts = providerAttempts(config).filter((attempt) => Boolean(attempt.embedModel));
+  if (attempts.length === 0) {
     throw new ProviderError('embed: no embedModel configured');
   }
-  await beforeModelCall(config.embedModel, 'embed');
-  const data = (await postJson(
-    config,
-    '/embeddings',
-    { model: config.embedModel, input: texts },
-    options.signal,
-  )) as { data?: { embedding?: unknown; index?: number }[] };
-  const rows = data.data ?? [];
-  if (rows.length !== texts.length || rows.some((r) => !Array.isArray(r.embedding))) {
-    throw new ProviderError('embed: response does not hold one embedding per input');
+  let lastError: unknown;
+  for (const [index, attempt] of attempts.entries()) {
+    const last = index === attempts.length - 1;
+    try {
+      await beforeModelCall(attempt.embedModel!, 'embed');
+      const data = (await postJson(
+        attempt,
+        '/embeddings',
+        { model: attempt.embedModel, input: texts },
+        options.signal,
+        last ? (attempts.length > 1 ? 4 : undefined) : 0,
+      )) as { data?: { embedding?: unknown; index?: number }[] };
+      const rows = data.data ?? [];
+      if (rows.length !== texts.length || rows.some((r) => !Array.isArray(r.embedding))) {
+        throw new ProviderError('embed: response does not hold one embedding per input');
+      }
+      const sorted = [...rows].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+      return { vectors: sorted.map((r) => r.embedding as number[]) };
+    } catch (error) {
+      lastError = error;
+      if (last || !shouldTryNextProvider(error, options.signal)) throw error;
+    }
   }
-  const sorted = [...rows].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-  return { vectors: sorted.map((r) => r.embedding as number[]) };
+  throw lastError;
 }

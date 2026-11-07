@@ -6,7 +6,7 @@
  * the model fails. All heavy libraries load dynamically so the first paint of
  * the app stays fast.
  */
-import { beforeModelCall, fetchWithRetry, normalizeBaseUrl, type ProviderConfig } from '@axiom/ai';
+import { beforeModelCall, fetchWithRetry, normalizeBaseUrl, providerAttempts, type ProviderConfig } from '@axiom/ai';
 import {
   hasUsableText,
   meaningfulLength,
@@ -354,64 +354,76 @@ export function makeVisionReader(
   return async (image) => {
     const provider = await config();
     if (provider === null) throw new Error('No provider configured for the OCR read.');
-    // The OCR role may be a different model from the chat role: swap the
-    // local runtime to it before the image is sent.
-    const model = provider.ocrModel ?? provider.chatModel;
-    await beforeModelCall(model, 'vision');
-    // Free hosted tiers allow only a few images per minute (Groq counts each
-    // page as ~2k tokens against an 8k TPM cap), so wait them out instead of
-    // silently downgrading the page to the built-in OCR.
-    const response = await fetchWithRetry(
-      `${normalizeBaseUrl(provider.baseUrl)}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {}),
-        },
-        ...(signal === undefined ? {} : { signal }),
-        body: JSON.stringify({
-          model,
-          temperature: 0,
-          // Keep the whole reply budget for the transcript; a thinking VLM
-          // otherwise spends it in the scratchpad and returns nothing.
-          ...(provider.ocrMaxTokens === undefined ? {} : { max_tokens: provider.ocrMaxTokens }),
-          ...(provider.ocrThink === undefined
-            ? {}
-            : {
-                think: provider.ocrThink,
-                ...(provider.ocrThink ? {} : { chat_template_kwargs: { enable_thinking: false } }),
-              }),
-          messages: [
-            { role: 'system', content: VISION_SYSTEM_PROMPT },
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'image_url',
-                  image_url: { url: `data:${image.mime};base64,${image.base64}` },
-                },
-                { type: 'text', text: VISION_USER_PROMPT },
-              ],
+    const attempts = providerAttempts(provider);
+    let lastError: unknown = new Error('No provider configured for the OCR read.');
+    for (const [index, attempt] of attempts.entries()) {
+      const last = index === attempts.length - 1;
+      // The OCR role may be a different model from the chat role: swap the
+      // local runtime to it before the image is sent.
+      const model = attempt.ocrModel ?? attempt.chatModel;
+      try {
+        await beforeModelCall(model, 'vision');
+        // Free hosted tiers allow only a few images per minute (Groq counts
+        // each page as ~2k tokens against an 8k TPM cap). A profile with a
+        // fallback behind it gets one quick chance, then the next key/model
+        // takes over; the last profile still waits the limit out.
+        const response = await fetchWithRetry(
+          `${normalizeBaseUrl(attempt.baseUrl)}/chat/completions`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(attempt.apiKey ? { Authorization: `Bearer ${attempt.apiKey}` } : {}),
             },
-          ],
-        }),
-      },
-      { retries: 8, signal },
-    );
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error(visionErrorMessage(model, response.status, detail));
+            ...(signal === undefined ? {} : { signal }),
+            body: JSON.stringify({
+              model,
+              temperature: 0,
+              // Keep the whole reply budget for the transcript; a thinking VLM
+              // otherwise spends it in the scratchpad and returns nothing.
+              ...(attempt.ocrMaxTokens === undefined ? {} : { max_tokens: attempt.ocrMaxTokens }),
+              ...(attempt.ocrThink === undefined
+                ? {}
+                : {
+                    think: attempt.ocrThink,
+                    ...(attempt.ocrThink ? {} : { chat_template_kwargs: { enable_thinking: false } }),
+                  }),
+              messages: [
+                { role: 'system', content: VISION_SYSTEM_PROMPT },
+                {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'image_url',
+                      image_url: { url: `data:${image.mime};base64,${image.base64}` },
+                    },
+                    { type: 'text', text: VISION_USER_PROMPT },
+                  ],
+                },
+              ],
+            }),
+          },
+          { retries: last ? 8 : 0, signal },
+        );
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '');
+          throw new Error(visionErrorMessage(model, response.status, detail));
+        }
+        const body = (await response.json()) as {
+          choices?: { message?: { content?: string; reasoning?: string } }[];
+        };
+        const message = body.choices?.[0]?.message;
+        const text = stripScanFurniture(message?.content ?? '');
+        if (!hasUsableText(text)) {
+          return { pageNumber: 1, text: null, method: 'vision', confidence: 0.9 };
+        }
+        return { pageNumber: 1, text, method: 'vision', confidence: 0.9 };
+      } catch (error) {
+        lastError = error;
+        if (signal?.aborted === true || last) throw error;
+      }
     }
-    const body = (await response.json()) as {
-      choices?: { message?: { content?: string; reasoning?: string } }[];
-    };
-    const message = body.choices?.[0]?.message;
-    const text = stripScanFurniture(message?.content ?? '');
-    if (!hasUsableText(text)) {
-      return { pageNumber: 1, text: null, method: 'vision', confidence: 0.9 };
-    }
-    return { pageNumber: 1, text, method: 'vision', confidence: 0.9 };
+    throw lastError;
   };
 }
 
