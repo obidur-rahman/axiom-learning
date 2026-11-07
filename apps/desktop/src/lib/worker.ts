@@ -107,10 +107,18 @@ async function runJob(
           }),
         signal,
       });
+      const modelPages =
+        result.visionPages === 0
+          ? ''
+          : `${result.visionPages} with ${result.visionModel === '' ? 'the OCR model' : result.visionModel}`;
+      const localPages =
+        result.ocrPages === 0 ? '' : `${result.ocrPages} with built-in OCR`;
+      const split = [modelPages, localPages].filter((part) => part !== '').join(', ');
       report(
         97,
         `Read ${result.pageCount} page${result.pageCount === 1 ? '' : 's'}` +
-          ` (${result.readable} with text${result.embedded > 0 ? `, ${result.embedded} embedded` : ''})` +
+          ` (${result.readable} with text${split === '' ? '' : `; ${split}`}` +
+          `${result.embedded > 0 ? `, ${result.embedded} embedded` : ''})` +
           (result.visionError === null
             ? ''
             : ` - model read failed: ${result.visionError}`),

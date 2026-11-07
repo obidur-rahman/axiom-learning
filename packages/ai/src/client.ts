@@ -1,5 +1,5 @@
 import type { ProviderConfig } from './config';
-import { getFetch } from './http';
+import { fetchWithRetry } from './http';
 import type { ZodType } from 'zod';
 
 /** A chat message the caller composes. */
@@ -93,12 +93,16 @@ async function postJson(
   body: unknown,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const response = await getFetch()(`${normalizeBaseUrl(config.baseUrl)}${path}`, {
-    method: 'POST',
-    headers: headers(config),
-    body: JSON.stringify(body),
-    signal,
-  });
+  const response = await fetchWithRetry(
+    `${normalizeBaseUrl(config.baseUrl)}${path}`,
+    {
+      method: 'POST',
+      headers: headers(config),
+      body: JSON.stringify(body),
+      signal,
+    },
+    { signal },
+  );
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     throw new ProviderError(`POST ${path} failed: ${response.status} ${text.slice(0, 300)}`, response.status);

@@ -6,7 +6,7 @@
  * the model fails. All heavy libraries load dynamically so the first paint of
  * the app stays fast.
  */
-import { beforeModelCall, getFetch, normalizeBaseUrl, type ProviderConfig } from '@axiom/ai';
+import { beforeModelCall, fetchWithRetry, normalizeBaseUrl, type ProviderConfig } from '@axiom/ai';
 import {
   hasUsableText,
   meaningfulLength,
@@ -358,40 +358,47 @@ export function makeVisionReader(
     // local runtime to it before the image is sent.
     const model = provider.ocrModel ?? provider.chatModel;
     await beforeModelCall(model, 'vision');
-    const response = await getFetch()(`${normalizeBaseUrl(provider.baseUrl)}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {}),
+    // Free hosted tiers allow only a few images per minute (Groq counts each
+    // page as ~2k tokens against an 8k TPM cap), so wait them out instead of
+    // silently downgrading the page to the built-in OCR.
+    const response = await fetchWithRetry(
+      `${normalizeBaseUrl(provider.baseUrl)}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {}),
+        },
+        ...(signal === undefined ? {} : { signal }),
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          // Keep the whole reply budget for the transcript; a thinking VLM
+          // otherwise spends it in the scratchpad and returns nothing.
+          ...(provider.ocrMaxTokens === undefined ? {} : { max_tokens: provider.ocrMaxTokens }),
+          ...(provider.ocrThink === undefined
+            ? {}
+            : {
+                think: provider.ocrThink,
+                ...(provider.ocrThink ? {} : { chat_template_kwargs: { enable_thinking: false } }),
+              }),
+          messages: [
+            { role: 'system', content: VISION_SYSTEM_PROMPT },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'image_url',
+                  image_url: { url: `data:${image.mime};base64,${image.base64}` },
+                },
+                { type: 'text', text: VISION_USER_PROMPT },
+              ],
+            },
+          ],
+        }),
       },
-      ...(signal === undefined ? {} : { signal }),
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        // Keep the whole reply budget for the transcript; a thinking VLM
-        // otherwise spends it in the scratchpad and returns nothing.
-        ...(provider.ocrMaxTokens === undefined ? {} : { max_tokens: provider.ocrMaxTokens }),
-        ...(provider.ocrThink === undefined
-          ? {}
-          : {
-              think: provider.ocrThink,
-              ...(provider.ocrThink ? {} : { chat_template_kwargs: { enable_thinking: false } }),
-            }),
-        messages: [
-          { role: 'system', content: VISION_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'image_url',
-                image_url: { url: `data:${image.mime};base64,${image.base64}` },
-              },
-              { type: 'text', text: VISION_USER_PROMPT },
-            ],
-          },
-        ],
-      }),
-    });
+      { retries: 8, signal },
+    );
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       throw new Error(visionErrorMessage(model, response.status, detail));

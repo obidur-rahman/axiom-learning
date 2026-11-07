@@ -271,6 +271,49 @@ export function UploadPanel({ courseId }: { courseId: string }) {
     [courseId, load, uploadKind],
   );
 
+  /**
+   * Requeue the whole read. Free hosted OCR tiers often fall back to the
+   * built-in OCR partway through a long scan; once the key or model is fixed,
+   * this replaces every stored page with a fresh, single-pass read.
+   */
+  const handleReread = useCallback(
+    async (materialId: string, pageCount: number | null) => {
+      const pages = pageCount === null ? 'every' : `all ${pageCount}`;
+      const ok = window.confirm(
+        `Read this file again and replace ${pages} stored pages?\n\n` +
+          'Reading a long scan with a hosted OCR model can take a while; pages are replaced as they are read.',
+      );
+      if (!ok) return;
+      setWork({
+        label: 'Queueing a fresh read',
+        detail: 'Every stored page will be replaced',
+        percent: null,
+        tone: 'busy',
+      });
+      try {
+        const db = await getDb();
+        const jobId = await enqueue(db.driver, 'read_material', { courseId, materialId });
+        emitAppEvent({
+          kind: 'job-updated',
+          jobId,
+          courseId,
+          jobKind: 'read_material',
+          status: 'queued',
+        });
+        setWork(null);
+        setNotice('Re-read queued. Pages are replaced as the worker reads them.');
+      } catch (error) {
+        setWork({
+          label: 'The re-read could not be queued',
+          detail: error instanceof Error ? error.message : String(error),
+          percent: null,
+          tone: 'error',
+        });
+      }
+    },
+    [courseId],
+  );
+
   /** FR-023: re-read one page with the vision model, from the stored copy. */
   const handleVisionPage = useCallback(
     async (materialId: string, pageNumber: number) => {
@@ -536,6 +579,17 @@ export function UploadPanel({ courseId }: { courseId: string }) {
                     >
                       Review pages
                     </Link>
+                  )}
+                  {hasPages && (
+                    <button
+                      type="button"
+                      onClick={() => void handleReread(material.id, material.pageCount)}
+                      disabled={material.status === 'reading'}
+                      className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs hover:border-accent disabled:opacity-50"
+                      title="Read the stored file again and replace every page"
+                    >
+                      Re-read
+                    </button>
                   )}
                   {hasPages && (
                     <details className="relative">

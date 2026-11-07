@@ -50,6 +50,12 @@ export interface ReadResult {
   embedded: number;
   /** Set when the OCR model failed at least once; the page text may be OCR. */
   visionError: string | null;
+  /** Pages read by the configured OCR model. */
+  visionPages: number;
+  /** Pages that fell back to the built-in tesseract OCR. */
+  ocrPages: number;
+  /** Model behind the vision pages, or '' when none was configured. */
+  visionModel: string;
 }
 
 /** One extracted page in the shape the database stores. */
@@ -277,5 +283,15 @@ async function readIntoPages(
     }
   }
 
-  return { pageCount: pages.length, readable, embedded, visionError };
+  const visionPages = pages.filter((page) => page.method === 'vision').length;
+  const ocrPages = pages.filter((page) => page.method === 'ocr').length;
+  return {
+    pageCount: pages.length,
+    readable,
+    embedded,
+    visionError,
+    visionPages,
+    ocrPages,
+    visionModel: ocrModel,
+  };
 }
